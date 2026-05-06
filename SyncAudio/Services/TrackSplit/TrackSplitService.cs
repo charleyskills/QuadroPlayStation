@@ -31,8 +31,13 @@ public sealed class TrackSplitService(
         Track track,
         ChannelMapping? overrideMapping = null,
         string? authHeaderValue = null,
+        string? outputFormatOverride = null,
         CancellationToken ct = default)
     {
+        var effectiveFormat = string.IsNullOrWhiteSpace(outputFormatOverride)
+            ? _opts.OutputFormat
+            : outputFormatOverride;
+
         // Source path is independent of mapping; we need it before we can probe channels.
         var sourceInfo = ResolveSource(track);
 
@@ -55,17 +60,17 @@ public sealed class TrackSplitService(
             mapping = ChannelMapFor(channelCount, channelLayout);
         }
 
-        var paths = ComputePaths(track, mapping);
+        var paths = ComputePaths(track, mapping, effectiveFormat);
 
         if (FilesExistAndUpToDate(sourceInfo.LocalPath, paths.FrontPath, paths.BackPath, track.Source))
         {
             return new TrackSplitResult(paths.FrontUrl, paths.BackUrl, channelCount, channelLayout, mapping);
         }
 
-        // Single-flight: only one ffmpeg job per (track, mapping) at a time. Different
-        // mappings of the same track can run in parallel because their cache files don't
-        // collide.
-        var lockKey = track.Id + "|" + mapping.ToFileSuffix();
+        // Single-flight: only one ffmpeg job per (track, mapping, format) at a time. Different
+        // mappings or formats of the same track can run in parallel because their cache files
+        // don't collide.
+        var lockKey = track.Id + "|" + mapping.ToFileSuffix() + "|" + effectiveFormat;
         var sem = _locks.GetOrAdd(lockKey, _ => new SemaphoreSlim(1, 1));
         await sem.WaitAsync(ct);
         try
@@ -85,7 +90,7 @@ public sealed class TrackSplitService(
 
             logger.LogInformation(
                 "Splitting {TrackId} ({Source}, {Channels}ch {Layout}, {Format}) → front=c{FL}|c{FR}, back=c{BL}|c{BR}",
-                track.Id, track.Source, channelCount, channelLayout ?? "?", _opts.OutputFormat,
+                track.Id, track.Source, channelCount, channelLayout ?? "?", effectiveFormat,
                 mapping.FrontL, mapping.FrontR, mapping.BackL, mapping.BackR);
 
             // Single ffmpeg invocation with two outputs — source is decoded once
@@ -95,7 +100,7 @@ public sealed class TrackSplitService(
                 sourceInfo.FfmpegInput,
                 paths.FrontPath, (mapping.FrontL, mapping.FrontR),
                 paths.BackPath, (mapping.BackL, mapping.BackR),
-                authHeaderValue, ct);
+                effectiveFormat, authHeaderValue, ct);
 
             return new TrackSplitResult(paths.FrontUrl, paths.BackUrl, channelCount, channelLayout, mapping);
         }
@@ -122,9 +127,9 @@ public sealed class TrackSplitService(
     }
 
     private (string FrontPath, string BackPath, string FrontUrl, string BackUrl)
-        ComputePaths(Track track, ChannelMapping mapping)
+        ComputePaths(Track track, ChannelMapping mapping, string outputFormat)
     {
-        var ext = _opts.OutputFormat.Equals("mp3", StringComparison.OrdinalIgnoreCase) ? "mp3" : "flac";
+        var ext = outputFormat.Equals("mp3", StringComparison.OrdinalIgnoreCase) ? "mp3" : "flac";
         var suffix = mapping.ToFileSuffix();
 
         string splitDir;
@@ -223,6 +228,7 @@ public sealed class TrackSplitService(
         string sourcePath,
         string frontPath, (int l, int r) frontCh,
         string backPath, (int l, int r) backCh,
+        string outputFormat,
         string? authHeaderValue, CancellationToken ct)
     {
         var filter =
@@ -246,11 +252,11 @@ public sealed class TrackSplitService(
 
         // Per-output codec flags must appear between the -map and the output path.
         psi.ArgumentList.Add("-map"); psi.ArgumentList.Add("[front]");
-        AppendOutputCodecArgs(psi);
+        AppendOutputCodecArgs(psi, outputFormat);
         psi.ArgumentList.Add(frontPath);
 
         psi.ArgumentList.Add("-map"); psi.ArgumentList.Add("[back]");
-        AppendOutputCodecArgs(psi);
+        AppendOutputCodecArgs(psi, outputFormat);
         psi.ArgumentList.Add(backPath);
 
         using var proc = Process.Start(psi)
@@ -277,9 +283,9 @@ public sealed class TrackSplitService(
         }
     }
 
-    private void AppendOutputCodecArgs(ProcessStartInfo psi)
+    private void AppendOutputCodecArgs(ProcessStartInfo psi, string outputFormat)
     {
-        if (_opts.OutputFormat.Equals("mp3", StringComparison.OrdinalIgnoreCase))
+        if (outputFormat.Equals("mp3", StringComparison.OrdinalIgnoreCase))
         {
             psi.ArgumentList.Add("-c:a"); psi.ArgumentList.Add("libmp3lame");
             psi.ArgumentList.Add("-b:a"); psi.ArgumentList.Add(_opts.Mp3Bitrate);

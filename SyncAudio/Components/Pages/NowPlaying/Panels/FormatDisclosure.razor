@@ -1,0 +1,23 @@
+<div class="np-format-disclosure">
+    <div class="np-section-label">Transcoding format</div>
+    <div class="np-format-row">
+        <button type="button"
+                class="np-format-pill @(IsActive("mp3") ? "np-format-pill--active" : "")"
+                @onclick="@(() => OnFormatSelected.InvokeAsync("mp3"))">
+            MP3
+        </button>
+        <button type="button"
+                class="np-format-pill @(IsActive("flac") ? "np-format-pill--active" : "")"
+                @onclick="@(() => OnFormatSelected.InvokeAsync("flac"))">
+            FLAC
+        </button>
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public string Selected { get; set; } = "mp3";
+    [Parameter] public EventCallback<string> OnFormatSelected { get; set; }
+
+    private bool IsActive(string format) =>
+        string.Equals(Selected, format, StringComparison.OrdinalIgnoreCase);
+}

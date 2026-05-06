@@ -382,6 +382,8 @@ const engine = {
         'OnRemoteTrackSelectedWithMeta', trackId, albumKey, title, artist, coverUrl)
         .catch(() => {});
     });
+    conn.on('FormatSelected', format =>
+      this._invoke('OnRemoteFormatSelected', format ?? 'mp3'));
     // Hub fires this when adaptive lead hit the 30s cap — peer is too slow
     // to be ready in time. Caller-only: surfaced to the user who hit Play.
     conn.on('WaitingForPeers', (remainingMs, fraction) =>
@@ -687,6 +689,11 @@ const engine = {
     return this.conn.invoke('RequestSelectTrackWithMeta',
       this.group, trackId ?? '', albumKey ?? '',
       title ?? '', artist ?? '', coverUrl ?? '');
+  },
+
+  selectFormat(format) {
+    if (!this.conn || !this.group) return;
+    return this.conn.invoke('RequestSelectFormat', this.group, format ?? 'mp3');
   },
 
   reportNowPlaying(trackId, title, artist, coverUrl) {

@@ -12,7 +12,14 @@
     </Content>
   </ItemGroup>
   <ItemGroup>
+    <PackageReference Include="Stateless" Version="5.16.0" />
     <PackageReference Include="TagLibSharp" Version="2.3.0" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\SyncAudio.ServiceDefaults\SyncAudio.ServiceDefaults.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="SyncAudio.Tests" />
   </ItemGroup>
   <ItemGroup>
     <Folder Include="wwwroot\audio\" />

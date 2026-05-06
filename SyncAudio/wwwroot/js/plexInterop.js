@@ -79,6 +79,8 @@
             frontR: track.frontR,
             backL: track.backL,
             backR: track.backR,
+            // Optional codec override ("mp3"|"flac"); null/undefined = server default.
+            outputFormat: track.outputFormat,
         });
         const res = await fetch('/plex/prepare', {
             method: 'POST',

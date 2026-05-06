@@ -88,11 +88,22 @@
                                         OnMappingReset="@(() => _context.Logic.ResetChannelMappingAsync())" />
                 </div>
                 <button type="button"
-                        class="np-sync-toggle-btn @(state.IsJoined ? "np-sync-toggle-btn--connected" : "") @(_syncOpen ? "np-sync-toggle-btn--active" : "")"
+                        class="np-sync-toggle-btn @(_formatOpen ? "np-sync-toggle-btn--active" : "")"
+                        @onclick="@(() => _formatOpen = !_formatOpen)">
+                    FORMAT
+                </button>
+                <button type="button"
+                        class="np-sync-toggle-btn @(state.IsJoined ? "np-sync-toggle-btn--connected" : "np-sync-toggle-btn--disconnected") @(_syncOpen ? "np-sync-toggle-btn--active" : "")"
                         @onclick="@(() => _syncOpen = !_syncOpen)">
                     SYNC
                 </button>
             </div>
+
+            @if (_formatOpen)
+            {
+                <FormatDisclosure Selected="@state.OutputFormat"
+                                  OnFormatSelected="@(f => _context.Logic.SetOutputFormatAsync(f))" />
+            }
 
             @if (_syncOpen)
             {

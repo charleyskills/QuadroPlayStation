@@ -1,130 +1,61 @@
-using System.Collections.Concurrent;
 using Microsoft.AspNetCore.SignalR;
-using SyncAudio.Services.Sync;
+using SyncAudio.Services.Sync.StateMachines;
 
 namespace SyncAudio.Hubs;
 
-public class SyncHub : Hub
+/// <summary>
+/// Thin SignalR dispatcher. All state-tracking and group-coordination logic lives in
+/// <see cref="IPlaybackOrchestrator"/>; the hub's job is to translate SignalR calls into
+/// orchestrator method calls and broadcast the returned <see cref="HubEffect"/>s.
+/// </summary>
+public class SyncHub(IPlaybackOrchestrator orchestrator) : Hub
 {
-    private static readonly ConcurrentDictionary<string, HashSet<string>> Groups_ = new();
-    private static readonly ConcurrentDictionary<string, ProgressSample> Progress = new();
-    private static readonly ConcurrentDictionary<string, ClientInfo> ClientInfos_ = new();
-    private static readonly ConcurrentDictionary<string, ClientPhase> ClientPhases_ = new();
-    private static readonly ConcurrentDictionary<string, PendingPlayRequest> PendingPlays_ = new();
-    private static readonly ConcurrentDictionary<string, ClientNowPlaying> ClientNowPlayings_ = new();
-    private static readonly Lock Lock = new();
 
-    private record ClientInfo(string DeviceName, string GroupName);
-    private record ClientPhase(string Phase, double Progress);
-    private record PendingPlayRequest(string TrackId, string RequestorConnectionId, double LeadSeconds);
-    private record ClientNowPlaying(string TrackId, string Title, string Artist, string? CoverUrl);
-
-    public async Task JoinGroup(string group, string? deviceName = null)
+    public Task JoinGroup(string group, string? deviceName = null)
     {
-        await Groups.AddToGroupAsync(Context.ConnectionId, group);
-        int count;
-        lock (Lock)
-        {
-            if (!Groups_.ContainsKey(group)) Groups_[group] = [];
-            Groups_[group].Add(Context.ConnectionId);
-            count = Groups_[group].Count;
-        }
-        ClientInfos_[Context.ConnectionId] = new ClientInfo(deviceName ?? "Device", group);
-        ClientPhases_.TryAdd(Context.ConnectionId, new ClientPhase("idle", 0));
-
-        await Clients.Group(group).SendAsync("MemberCount", count);
-        await BroadcastPeersState(group);
+        var effects = orchestrator.OnJoin(Context.ConnectionId, group, deviceName ?? "Device");
+        // The orchestrator's GroupBroadcast effects target the SignalR group, but the
+        // caller hasn't been added to that group via the underlying SignalR machinery
+        // yet. Add to the SignalR group first so MemberCount/PeersStateUpdated reach
+        // this connection too.
+        return AddToGroupThenApply(group, effects);
     }
 
-    // NTP-style: returns server clock at moment of receipt
     public long Ping() => DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
-    /// <summary>
-    /// Receive a buffer-progress sample from a client. Used by <see cref="RequestPlay"/>
-    /// to compute an adaptive lead time so the slowest peer is ready by the play moment.
-    /// A drop in fraction (e.g. setSrc on a new track) re-anchors the speed-estimation
-    /// baseline. Also broadcasts peer states to the group so each device can see others'
-    /// buffering progress.
-    /// </summary>
-    public async Task ReportProgress(string group, double p)
+    public Task ReportProgress(string group, double p)
     {
         var nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-        var clamped = Math.Clamp(p, 0.0, 1.0);
-
-        Progress.AddOrUpdate(
-            Context.ConnectionId,
-            _ => new ProgressSample(clamped, nowMs, clamped, nowMs),
-            (_, existing) =>
-            {
-                // A meaningful drop in reported fraction means the client started over
-                // (new decode). Re-anchor First* so speed extrapolation reflects the
-                // current download, not a mix of old + new.
-                if (clamped + 0.05 < existing.LastFraction)
-                    return new ProgressSample(clamped, nowMs, clamped, nowMs);
-                return existing with { LastFraction = clamped, LastTimestampMs = nowMs };
-            });
-
-        ClientPhases_[Context.ConnectionId] =
-            new ClientPhase(clamped >= 1.0 ? "ready" : "buffering", clamped);
-
-        await TryTriggerPendingPlay(group);
-        await BroadcastPeersState(group);
+        var effects = orchestrator.OnReportProgress(Context.ConnectionId, group, p, nowMs);
+        return ApplyEffectsAsync(effects);
     }
 
-    /// <summary>
-    /// Client reports an explicit phase transition: splitting, buffering, ready, playing, idle.
-    /// Broadcasts the updated peer state to the group so all devices see the change.
-    /// </summary>
-    public async Task ReportPhase(string group, string phase, double progress)
+    public Task ReportPhase(string group, string phase, double progress)
     {
-        ClientPhases_[Context.ConnectionId] =
-            new ClientPhase(phase, Math.Clamp(progress, 0.0, 1.0));
-        await TryTriggerPendingPlay(group);
-        await BroadcastPeersState(group);
+        var effects = orchestrator.OnReportPhase(Context.ConnectionId, group, phase, progress);
+        return ApplyEffectsAsync(effects);
     }
 
-    public async Task RequestPlay(string group, string trackId, double leadSeconds = 3.0)
+    public Task RequestPlay(string group, string trackId, double leadSeconds = 3.0)
     {
-        int readyCount, totalCount;
-        lock (Lock)
-        {
-            var members = Groups_.TryGetValue(group, out var m) ? m : [];
-            totalCount = members.Count;
-            // Reset every peer's phase so they must re-confirm readiness for this
-            // specific track before the play fires. The caller keeps its phase —
-            // it already has the track buffered and will stay (or become) "ready".
-            foreach (var id in members)
-                if (id != Context.ConnectionId)
-                    ClientPhases_[id] = new ClientPhase("buffering", 0.0);
-            var callerReady = ClientPhases_.TryGetValue(Context.ConnectionId, out var cp)
-                              && cp.Phase == "ready";
-            readyCount = callerReady ? 1 : 0;
-            PendingPlays_[group] = new PendingPlayRequest(trackId, Context.ConnectionId, leadSeconds);
-        }
-
-        // Ask peers to buffer the new track. Each peer re-reports "ready" once
-        // it has the buffer decoded (same track → immediate; different → after split+decode).
-        await Clients.OthersInGroup(group).SendAsync("TrackSelected", trackId);
-
-        // Fire immediately when caller is the only member; otherwise wait for peers.
-        await TryTriggerPendingPlay(group);
-        if (PendingPlays_.ContainsKey(group))
-            await Clients.Caller.SendAsync("WaitingForPeers", (long)0,
-                (double)readyCount / Math.Max(totalCount, 1));
+        var effects = orchestrator.OnRequestPlay(Context.ConnectionId, group, trackId, leadSeconds);
+        return ApplyEffectsAsync(effects);
     }
 
     public Task RequestStop(string group)
     {
-        PendingPlays_.TryRemove(group, out _);
-        return Clients.Group(group).SendAsync("StopPlay");
+        var effects = orchestrator.OnRequestStop(Context.ConnectionId, group);
+        return ApplyEffectsAsync(effects);
     }
 
-    public async Task ReportNowPlaying(string group, string trackId, string title, string artist, string? coverUrl)
+    public Task ReportNowPlaying(string group, string trackId, string title, string artist, string? coverUrl)
     {
-        ClientNowPlayings_[Context.ConnectionId] = new ClientNowPlaying(trackId, title, artist, coverUrl);
-        await BroadcastPeersState(group);
+        var effects = orchestrator.OnReportNowPlaying(
+            Context.ConnectionId, group, trackId, title, artist, coverUrl);
+        return ApplyEffectsAsync(effects);
     }
 
+    // Pure-broadcast methods — no state implication, leave as direct sends.
     public Task RequestSelectAlbum(string group, string albumRatingKey)
         => Clients.OthersInGroup(group).SendAsync("AlbumSelected", albumRatingKey);
 
@@ -137,73 +68,38 @@ public class SyncHub : Hub
         => Clients.OthersInGroup(group).SendAsync(
             "TrackSelectedWithMeta", trackId, albumKey ?? "", title, artist, coverUrl ?? "");
 
+    public Task RequestSelectFormat(string group, string format)
+        => Clients.OthersInGroup(group).SendAsync("FormatSelected", format);
+
     public override async Task OnDisconnectedAsync(Exception? ex)
     {
-        string? groupName = null;
-        lock (Lock)
-            foreach (var (g, members) in Groups_)
-                if (members.Remove(Context.ConnectionId)) { groupName = g; break; }
-
-        if (ClientInfos_.TryRemove(Context.ConnectionId, out var info))
-            groupName ??= info.GroupName;
-        ClientPhases_.TryRemove(Context.ConnectionId, out _);
-        Progress.TryRemove(Context.ConnectionId, out _);
-        ClientNowPlayings_.TryRemove(Context.ConnectionId, out _);
-
+        var effects = orchestrator.OnDisconnect(Context.ConnectionId);
         await base.OnDisconnectedAsync(ex);
-        if (groupName is not null)
-        {
-            await TryTriggerPendingPlay(groupName);
-            await BroadcastPeersState(groupName);
-        }
+        await ApplyEffectsAsync(effects);
     }
 
-    private Task FirePlay(string group, string trackId, double leadSeconds)
+    private async Task AddToGroupThenApply(string group, IReadOnlyList<HubEffect> effects)
     {
-        var nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-        var lead = Math.Max(AdaptiveLeadCalculator.MinLeadMs, (long)(leadSeconds * 1000));
-        return Clients.Group(group).SendAsync("ScheduledPlay", nowMs + lead, trackId);
+        await Groups.AddToGroupAsync(Context.ConnectionId, group);
+        await ApplyEffectsAsync(effects);
     }
 
-    private async Task TryTriggerPendingPlay(string group)
+    private async Task ApplyEffectsAsync(IReadOnlyList<HubEffect> effects)
     {
-        if (!PendingPlays_.TryGetValue(group, out _)) return;
-
-        bool allReady;
-        lock (Lock)
+        foreach (var effect in effects)
         {
-            allReady = Groups_.TryGetValue(group, out var members)
-                && members.Count > 0
-                && members.All(id => ClientPhases_.TryGetValue(id, out var cp) && cp.Phase == "ready");
+            switch (effect)
+            {
+                case GroupBroadcast g:
+                    await Clients.Group(g.Group).SendCoreAsync(g.Method, g.Args);
+                    break;
+                case OthersInGroupBroadcast o:
+                    await Clients.OthersInGroup(o.Group).SendCoreAsync(o.Method, o.Args);
+                    break;
+                case ClientSend c:
+                    await Clients.Client(c.ConnectionId).SendCoreAsync(c.Method, c.Args);
+                    break;
+            }
         }
-
-        if (allReady && PendingPlays_.TryRemove(group, out var fired))
-            await FirePlay(group, fired.TrackId, fired.LeadSeconds);
-    }
-
-    private Task BroadcastPeersState(string group)
-    {
-        List<object> peers;
-        lock (Lock)
-        {
-            peers = Groups_.TryGetValue(group, out var members)
-                ? members.Select(connId =>
-                {
-                    var name = ClientInfos_.TryGetValue(connId, out var ci) ? ci.DeviceName : "Device";
-                    var (phase, prog) = ClientPhases_.TryGetValue(connId, out var cp)
-                        ? (cp.Phase, cp.Progress) : ("idle", 0.0);
-                    ClientNowPlayings_.TryGetValue(connId, out var np);
-                    return (object)new
-                    {
-                        connectionId = connId, name, phase, progress = prog,
-                        trackId  = np?.TrackId  ?? "",
-                        title    = np?.Title    ?? "",
-                        artist   = np?.Artist   ?? "",
-                        coverUrl = np?.CoverUrl ?? "",
-                    };
-                }).ToList()
-                : [];
-        }
-        return Clients.Group(group).SendAsync("PeersStateUpdated", peers);
     }
 }

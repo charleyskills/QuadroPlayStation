@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Components;
 using Microsoft.Extensions.Caching.Memory;
+using SyncAudio.Components.Pages.NowPlaying.StateMachines;
 using SyncAudio.Models;
 using SyncAudio.Services;
 using SyncAudio.Services.TrackSplit;
@@ -55,6 +56,13 @@ public sealed class NowPlayingLogic(
     /// a remote selection or when an album selection already handles the broadcast.
     /// </summary>
     public EventCallback<string> TrackSelectionBroadcastRequested { get; set; }
+
+    /// <summary>
+    /// Fired when the user picks a new output codec ("mp3"/"flac") so the View can
+    /// broadcast the choice to the group via SignalR. Peers re-split with the new
+    /// codec; the originator follows up with a fresh PlayRequested.
+    /// </summary>
+    public EventCallback<string> FormatSelectionBroadcastRequested { get; set; }
 
     private bool _mirroringRemote;
     private double? _pendingPlayAtMs;
@@ -116,7 +124,7 @@ public sealed class NowPlayingLogic(
     /// </summary>
     private async Task SplitForCurrentTrackAsync(Track track)
     {
-        state.IsSplitting = true;
+        state.Machine.Fire(LocalDeviceTrigger.TrackSelected);
         state.FrontStreamUrl = null;
         state.BackStreamUrl = null;
         await OnStateHasChanged.InvokeAsync();
@@ -130,9 +138,13 @@ public sealed class NowPlayingLogic(
             return;
         }
 
+        var failed = false;
         try
         {
-            var result = await splitter.EnsureSplitAsync(track, state.ChannelMappingOverride);
+            var result = await splitter.EnsureSplitAsync(
+                track,
+                state.ChannelMappingOverride,
+                outputFormatOverride: state.OutputFormat);
             // If the user has switched tracks again while we were running, drop our result.
             if (state.CurrentTrack?.Id != track.Id) return;
 
@@ -148,11 +160,13 @@ public sealed class NowPlayingLogic(
         }
         catch (Exception ex)
         {
+            failed = true;
             logger.LogError(ex, "Track split failed for {TrackId}", track.Id);
         }
         finally
         {
-            state.IsSplitting = false;
+            if (state.Machine.State == LocalDeviceState.Splitting)
+                state.Machine.Fire(failed ? LocalDeviceTrigger.SplitFailed : LocalDeviceTrigger.SplitDone);
             await OnStateHasChanged.InvokeAsync();
         }
     }
@@ -165,7 +179,7 @@ public sealed class NowPlayingLogic(
         try
         {
             await JoinRequested.InvokeAsync();
-            state.IsJoined = true;
+            state.Machine.Fire(LocalDeviceTrigger.Joined);
             state.ActiveConnectionToast = new NowPlayingState.ConnectionToast(false, $"Connected to {state.GroupName}");
         }
         catch (Exception ex)
@@ -343,6 +357,79 @@ public sealed class NowPlayingLogic(
         return Task.CompletedTask;
     }
 
+    public Task ToggleFormatPanelAsync()
+    {
+        state.FormatOpen = !state.FormatOpen;
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Switch the transcoding codec for the current group. When called with a different
+    /// format than <see cref="NowPlayingState.OutputFormat"/>:
+    /// <list type="number">
+    ///   <item>updates state and notifies peers in the same group;</item>
+    ///   <item>re-runs the per-track split with the new codec (cache-keyed by extension);</item>
+    ///   <item>if currently playing, fires <see cref="PlayRequested"/> so the orchestrator
+    ///   resets every member to Buffering and emits a fresh ScheduledPlay.</item>
+    /// </list>
+    /// Idle case: just saves the preference; the next PLAY uses it.
+    /// </summary>
+    public async Task SetOutputFormatAsync(string format)
+    {
+        if (format != "mp3" && format != "flac")
+        {
+            logger.LogDebug("SetOutputFormat ignored: unknown format '{Format}'", format);
+            return;
+        }
+        if (string.Equals(state.OutputFormat, format, StringComparison.Ordinal)) return;
+
+        var wasPlaying = state.IsPlaying;
+        state.OutputFormat = format;
+
+        try
+        {
+            if (state.IsJoined)
+                await FormatSelectionBroadcastRequested.InvokeAsync(format);
+
+            if (state.CurrentTrack is { } track)
+            {
+                await SplitForCurrentTrackAsync(track);
+
+                if (wasPlaying && state.IsJoined)
+                    await PlayRequested.InvokeAsync();
+            }
+
+            await OnStateHasChanged.InvokeAsync();
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to switch output format to {Format}", format);
+        }
+    }
+
+    /// <summary>
+    /// Called when another device in the group switches the output codec. Re-splits the
+    /// current track with the new format so this peer is ready when the orchestrator's next
+    /// OnRequestPlay resets it to Buffering. Does NOT fire PlayRequested — only the
+    /// originator drives the restart.
+    /// </summary>
+    public async Task MirrorRemoteFormatChangeAsync(string format)
+    {
+        if (format != "mp3" && format != "flac")
+        {
+            logger.LogDebug("MirrorRemoteFormatChange ignored: unknown format '{Format}'", format);
+            return;
+        }
+        if (string.Equals(state.OutputFormat, format, StringComparison.Ordinal)) return;
+
+        state.OutputFormat = format;
+
+        if (state.CurrentTrack is { } track)
+            await SplitForCurrentTrackAsync(track);
+
+        await OnStateHasChanged.InvokeAsync();
+    }
+
     public async Task SetVolumeAsync(double value)
     {
         var clamped = Math.Clamp(value, 0.0, 1.0);
@@ -392,13 +479,17 @@ public sealed class NowPlayingLogic(
     public async Task OnPlayStateChangedAsync(bool isPlaying)
     {
         if (state.IsPlaying == isPlaying) return;
-        state.IsPlaying = isPlaying;
-        // Once audio actually starts, the "waiting for peers" advisory is stale.
-        if (isPlaying) state.IsWaitingForPeers = false;
+        // Machine clears IsWaitingForPeers via PlaybackBegan event on entry to Playing.
+        var trigger = isPlaying ? LocalDeviceTrigger.PlayStarted : LocalDeviceTrigger.PlaybackEnded;
+        if (state.Machine.CanFire(trigger)) state.Machine.Fire(trigger);
         await OnStateHasChanged.InvokeAsync();
     }
 
-    public void OnTrackEndedNaturally() => _trackEndedNaturally = true;
+    public async Task OnTrackEndedNaturally()
+    {
+        _trackEndedNaturally = true;
+        await NextAsync();
+    }
 
     public async Task OnWaitingForPeersAsync()
     {
@@ -410,7 +501,11 @@ public sealed class NowPlayingLogic(
     public async Task OnReadyChangedAsync(bool isReady)
     {
         if (state.IsReady == isReady) return;
-        state.IsReady = isReady;
+        // isReady=true → BufferReady (Buffering→Ready, or Playing reentry); isReady=false → no-op
+        // (the JS only reports false on track change, which is handled by the TrackSelected trigger
+        // in SplitForCurrentTrackAsync).
+        if (isReady && state.Machine.CanFire(LocalDeviceTrigger.BufferReady))
+            state.Machine.Fire(LocalDeviceTrigger.BufferReady);
         await OnStateHasChanged.InvokeAsync();
     }
 
@@ -689,7 +784,8 @@ public sealed class NowPlayingLogic(
         _trackEndedNaturally = false;
 
         var track = state.Library.FirstOrDefault(t => t.Id == trackId)
-                    ?? state.Queue.FirstOrDefault(t => t.Id == trackId);
+                    ?? state.Queue.FirstOrDefault(t => t.Id == trackId)
+                    ?? state.AlbumTracks.FirstOrDefault(t => t.Id == trackId);
         if (track is null)
         {
             if (state.IsPlexLoadingAlbum)
@@ -811,7 +907,8 @@ public sealed class NowPlayingLogic(
         if (channelCount is { } c) state.SourceChannelCount = c;
         if (channelLayout is not null) state.SourceChannelLayout = channelLayout;
         if (effectiveMapping is not null) state.EffectiveChannelMapping = effectiveMapping;
-        state.IsSplitting = false;
+        if (state.Machine.State == LocalDeviceState.Splitting)
+            state.Machine.Fire(LocalDeviceTrigger.SplitDone);
         await CurrentTrackOnChanged.InvokeAsync(state.CurrentTrack);
         await OnStateHasChanged.InvokeAsync();
     }
@@ -820,7 +917,8 @@ public sealed class NowPlayingLogic(
     {
         if (state.CurrentTrack?.Id != trackId) return;
         logger.LogWarning("Plex prepare failed for {TrackId}: {Reason}", trackId, reason);
-        state.IsSplitting = false;
+        if (state.Machine.State == LocalDeviceState.Splitting)
+            state.Machine.Fire(LocalDeviceTrigger.SplitFailed);
         await OnStateHasChanged.InvokeAsync();
     }
 }

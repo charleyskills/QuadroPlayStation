@@ -1,3 +1,4 @@
+using SyncAudio.Components.Pages.NowPlaying.StateMachines;
 using SyncAudio.Models;
 using SyncAudio.Services.TrackSplit;
 
@@ -7,6 +8,21 @@ public sealed class NowPlayingState
 {
     private static readonly IReadOnlyList<string> DefaultPalette =
         ["#FF5E7E", "#7A3CFF", "#FF9E5E"];
+
+    /// <summary>
+    /// Playback lifecycle state machine. Drives the derived <see cref="IsJoined"/>,
+    /// <see cref="IsSplitting"/>, <see cref="IsBuffering"/>, <see cref="IsReady"/>,
+    /// and <see cref="IsPlaying"/> getters. Public so <see cref="NowPlayingLogic"/>
+    /// can fire triggers; do not mutate state directly.
+    /// </summary>
+    public LocalDeviceStateMachine Machine { get; }
+
+    public NowPlayingState()
+    {
+        Machine = new LocalDeviceStateMachine();
+        // Auto-clear the WaitingForPeers advisory when playback actually begins.
+        Machine.PlaybackBegan += () => IsWaitingForPeers = false;
+    }
 
     public event Func<Task>? OnStateChanged;
 
@@ -71,22 +87,19 @@ public sealed class NowPlayingState
 
     internal readonly List<string> HistoryIds = new(8);
 
-    public bool IsPlaying
-    {
-        get;
-        set => SetProperty(ref field, value);
-    }
+    /// <summary>True iff the local audio source is actively playing. Derived from the state machine.</summary>
+    public bool IsPlaying => Machine.State == LocalDeviceState.Playing;
 
-    public bool IsReady
-    {
-        get;
-        set => SetProperty(ref field, value);
-    }
+    /// <summary>True iff the buffer is decoded and either ready to play or currently playing.
+    /// Stays true throughout <see cref="LocalDeviceState.Playing"/> so <see cref="IsBuffering"/> is
+    /// suppressed during playback. Derived from the state machine.</summary>
+    public bool IsReady => Machine.State is LocalDeviceState.Ready or LocalDeviceState.Playing;
 
     /// <summary>
     /// Hub fired WaitingForPeers because the adaptive lead would have exceeded its cap —
     /// the slowest peer probably won't be ready in time, so playback may drift on that
-    /// device. Auto-clears when playback actually starts (see <c>OnPlayStateChangedAsync</c>).
+    /// device. Auto-clears when playback actually starts (the <see cref="LocalDeviceStateMachine.PlaybackBegan"/>
+    /// event subscribes in the ctor). Set by the JS-side <c>UpdateWaitingForPeers</c> hub callback.
     /// </summary>
     public bool IsWaitingForPeers
     {
@@ -138,11 +151,8 @@ public sealed class NowPlayingState
         set => SetPropertyAndNotify(ref field, value);
     } = "demo";
 
-    public bool IsJoined
-    {
-        get;
-        set => SetPropertyAndNotify(ref field, value);
-    }
+    /// <summary>True iff this circuit has joined a SignalR group. Derived from the state machine.</summary>
+    public bool IsJoined => Machine.State != LocalDeviceState.Disconnected;
 
     public int MemberCount
     {
@@ -211,26 +221,42 @@ public sealed class NowPlayingState
         set => SetPropertyAndNotify(ref field, value);
     } = "Front";
 
-    /// <summary>URL of the front-pair MP3 produced by ffmpeg for the current track. Null until the split completes.</summary>
+    /// <summary>URL of the front-pair audio file produced by ffmpeg for the current track.
+    /// Extension matches <see cref="OutputFormat"/>. Null until the split completes.</summary>
     public string? FrontStreamUrl
     {
         get;
         set => SetProperty(ref field, value);
     }
 
-    /// <summary>URL of the back-pair MP3 produced by ffmpeg for the current track. Null until the split completes.</summary>
+    /// <summary>URL of the back-pair audio file produced by ffmpeg for the current track.
+    /// Extension matches <see cref="OutputFormat"/>. Null until the split completes.</summary>
     public string? BackStreamUrl
     {
         get;
         set => SetProperty(ref field, value);
     }
 
-    /// <summary>True while ffmpeg is producing the split files for the current track.</summary>
-    public bool IsSplitting
+    /// <summary>
+    /// Audio codec used for the per-track ffmpeg split: "mp3" (default, smaller, lossy) or
+    /// "flac" (lossless, sample-accurate sync). Group-wide preference — when this device
+    /// changes it, all peers in the group resplit and restart playback together.
+    /// </summary>
+    public string OutputFormat
     {
         get;
-        set => SetProperty(ref field, value);
+        set => SetPropertyAndNotify(ref field, value);
+    } = "mp3";
+
+    /// <summary>True while the FORMAT disclosure pane is expanded under the toolbar.</summary>
+    public bool FormatOpen
+    {
+        get;
+        set => SetPropertyAndNotify(ref field, value);
     }
+
+    /// <summary>True while ffmpeg is producing the split files for the current track. Derived from the state machine.</summary>
+    public bool IsSplitting => Machine.State == LocalDeviceState.Splitting;
 
     /// <summary>Number of audio channels in the current track's source, as reported by ffprobe. Null until the split returns.</summary>
     public int? SourceChannelCount
@@ -369,12 +395,9 @@ public sealed class NowPlayingState
         DurationSeconds > 0 ? FormatTime(DurationSeconds) : (CurrentTrack?.DurationDisplay ?? "—:—");
 
     /// <summary>True while the browser is downloading and decoding the audio file.
-    /// Distinct from IsSplitting (server ffmpeg) — this is the client-side load phase.</summary>
-    public bool IsBuffering =>
-        CurrentTrack is not null &&
-        !IsSplitting &&
-        !IsReady &&
-        CurrentStreamUrl is not null;
+    /// Distinct from IsSplitting (server ffmpeg) — this is the client-side load phase.
+    /// Derived from the state machine.</summary>
+    public bool IsBuffering => Machine.State == LocalDeviceState.Buffering;
 
     /// <summary>True while any other joined device is still splitting or buffering.</summary>
     public bool AnyPeerLoading =>
@@ -389,10 +412,10 @@ public sealed class NowPlayingState
         set => SetProperty(ref field, value);
     } = [];
 
-    /// <summary>True while joined, not playing, and at least one peer is actively loading.</summary>
+    /// <summary>True while joined and at least one peer is still loading (pre-playing).</summary>
     public bool ShowPeersPanel =>
         IsJoined &&
-        Peers.Any(p => p.Phase is "splitting" or "buffering" or "ready" or "playing");
+        Peers.Any(p => p.Phase is "splitting" or "buffering" or "ready");
 
     public bool IsSpatial => CurrentTrack?.Spatial == true || Channels >= 4;
     public bool IsLossless => CurrentTrack?.Lossless == true;

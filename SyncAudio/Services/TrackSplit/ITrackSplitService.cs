@@ -17,9 +17,13 @@ public interface ITrackSplitService
     /// <param name="authHeaderValue">For remote sources, the value of an HTTP header to send to the
     /// origin (e.g. <c>X-Plex-Token: ...</c>). Ignored for local sources. Pass null when no
     /// auth is required.</param>
+    /// <param name="outputFormatOverride">Per-call codec override ("mp3" or "flac"). When null,
+    /// falls back to <c>TrackSplitOptions.OutputFormat</c>. Cache files are keyed by extension,
+    /// so mp3 and flac for the same (track, mapping) coexist on disk.</param>
     Task<TrackSplitResult> EnsureSplitAsync(
         Track track,
         ChannelMapping? overrideMapping = null,
         string? authHeaderValue = null,
+        string? outputFormatOverride = null,
         CancellationToken ct = default);
 }

@@ -99,6 +99,7 @@
     position: relative;
     min-height: 100vh;
     padding-bottom: 48px;
+    overscroll-behavior: none;
 }
 
 /* ─── Top bar: glass pills (only glass surfaces in the design) ─── */
@@ -612,6 +613,43 @@
 }
 .np-sync-toggle-btn--connected.np-sync-toggle-btn--active {
     background: rgba(29, 185, 84, 0.18);
+}
+.np-sync-toggle-btn--disconnected {
+    border-color: #e23b3b;
+    color: #e23b3b;
+}
+.np-sync-toggle-btn--disconnected.np-sync-toggle-btn--active {
+    background: rgba(226, 59, 59, 0.18);
+}
+
+/* ─── FORMAT disclosure pane (mp3 / flac toggle) ─── */
+.np-format-disclosure {
+    padding: 8px 20px 12px;
+}
+.np-format-row {
+    display: flex;
+    gap: 8px;
+    margin-top: 6px;
+}
+.np-format-pill {
+    flex: 0 0 auto;
+    padding: 7px 18px;
+    border: 1px solid var(--np-hairline);
+    background: rgba(255, 255, 255, 0.04);
+    color: var(--np-muted-1);
+    border-radius: 20px;
+    cursor: pointer;
+    font: inherit;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.np-format-pill:hover { background: rgba(255, 255, 255, 0.08); }
+.np-format-pill--active {
+    background: rgba(255, 255, 255, 0.12);
+    border-color: rgba(255, 255, 255, 0.4);
+    color: #fff;
 }
 
 /* ─── Hairline divider between major sections ─── */

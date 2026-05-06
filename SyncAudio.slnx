@@ -1,4 +1,6 @@
 <Solution>
+  <Project Path="SyncAudio.AppHost/SyncAudio.AppHost.csproj" />
+  <Project Path="SyncAudio.ServiceDefaults/SyncAudio.ServiceDefaults.csproj" />
   <Project Path="SyncAudio.Tests/SyncAudio.Tests.csproj" />
   <Project Path="SyncAudio/SyncAudio.csproj" />
 </Solution>

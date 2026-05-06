@@ -32,6 +32,7 @@ public abstract class NowPlayingBase : ComponentBase, IAsyncDisposable
     private bool _prevIsSplitting;
     private bool _prevIsJoined;
     protected bool _syncOpen;
+    protected bool _formatOpen;
     private CancellationTokenSource? _toastDismissCts;
 
     // Subclasses override this to redirect to their own base route when no RoomId is provided.
@@ -60,6 +61,7 @@ public abstract class NowPlayingBase : ComponentBase, IAsyncDisposable
         _context.Logic.PlexAlbumPlayRequested            = EventCallback.Factory.Create<string>(this, HandlePlexAlbumPlayRequested);
         _context.Logic.AlbumSelectionBroadcastRequested  = EventCallback.Factory.Create<string>(this, HandleAlbumSelectionBroadcast);
         _context.Logic.TrackSelectionBroadcastRequested  = EventCallback.Factory.Create<string>(this, HandleTrackSelectionBroadcast);
+        _context.Logic.FormatSelectionBroadcastRequested = EventCallback.Factory.Create<string>(this, HandleFormatSelectionBroadcast);
 
         // Seed connection state from the cookie. This is the only point in the
         // component lifecycle where IHttpContextAccessor.HttpContext is available
@@ -470,6 +472,12 @@ public abstract class NowPlayingBase : ComponentBase, IAsyncDisposable
             await JS.InvokeVoidAsync("syncAudio.selectTrack", trackId);
     }
 
+    private async Task HandleFormatSelectionBroadcast(string format)
+    {
+        if (!_jsInitialized) return;
+        await JS.InvokeVoidAsync("syncAudio.selectFormat", format);
+    }
+
     [JSInvokable]
     public Task OnRemoteAlbumSelected(string albumRatingKey)
         => _context.Logic.MirrorRemoteAlbumSelectionAsync(albumRatingKey);
@@ -482,6 +490,10 @@ public abstract class NowPlayingBase : ComponentBase, IAsyncDisposable
         if (!isSame) await _context.Logic.MirrorRemoteTrackSelectionAsync(trackId);
         return isSame;
     }
+
+    [JSInvokable]
+    public Task OnRemoteFormatSelected(string format)
+        => _context.Logic.MirrorRemoteFormatChangeAsync(format);
 
     [JSInvokable]
     public async Task OnRemoteTrackSelectedWithMeta(
@@ -537,6 +549,7 @@ public abstract class NowPlayingBase : ComponentBase, IAsyncDisposable
                 frontR = (int?)ov?.FrontR,
                 backL = (int?)ov?.BackL,
                 backR = (int?)ov?.BackR,
+                outputFormat = _context.State.OutputFormat,
             };
             var raw = await JS.InvokeAsync<JsonElement>("plexInterop.prepare", payload);
             if (raw.TryGetProperty("error", out var err))
@@ -616,11 +629,7 @@ public abstract class NowPlayingBase : ComponentBase, IAsyncDisposable
     public Task UpdatePlayState(bool isPlaying) => _context.Logic.OnPlayStateChangedAsync(isPlaying);
 
     [JSInvokable]
-    public Task UpdateTrackEnded()
-    {
-        _context.Logic.OnTrackEndedNaturally();
-        return Task.CompletedTask;
-    }
+    public Task UpdateTrackEnded() => _context.Logic.OnTrackEndedNaturally();
 
     [JSInvokable]
     public Task UpdateReady(bool isReady) => _context.Logic.OnReadyChangedAsync(isReady);

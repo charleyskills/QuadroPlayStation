@@ -6,9 +6,11 @@ using SyncAudio.Components.Pages.NowPlaying;
 using SyncAudio.Hubs;
 using SyncAudio.Services;
 using SyncAudio.Services.Plex;
+using SyncAudio.Services.Sync.StateMachines;
 using SyncAudio.Services.TrackSplit;
 
 var builder = WebApplication.CreateBuilder(args);
+builder.AddServiceDefaults();
 builder.WebHost.UseStaticWebAssets();
 builder.Services.AddRazorComponents().AddInteractiveServerComponents();
 builder.Services.AddSignalR();
@@ -16,6 +18,7 @@ builder.Services.AddMemoryCache();
 
 builder.Services.AddSingleton<ICoverArtService, CoverArtService>();
 builder.Services.AddSingleton<ITrackLibraryService, TrackLibraryService>();
+builder.Services.AddSingleton<IPlaybackOrchestrator, PlaybackOrchestrator>();
 builder.Services.AddScoped<INowPlayingContextFactory, NowPlayingContextFactory>();
 
 builder.Services.Configure<TrackSplitOptions>(
@@ -72,6 +75,8 @@ var contentTypes = new FileExtensionContentTypeProvider
 };
 
 var app = builder.Build();
+
+app.MapDefaultEndpoints();
 
 app.UseForwardedHeaders();
 app.UseStaticFiles(new StaticFileOptions
@@ -255,7 +260,12 @@ app.MapPost("/plex/prepare", async (PlexPrepareRequest body,
             overrideMapping = new ChannelMapping(fl, fr, bl, br);
         }
 
-        var result = await splitter.EnsureSplitAsync(track, overrideMapping, $"X-Plex-Token: {token}", ct);
+        var result = await splitter.EnsureSplitAsync(
+            track,
+            overrideMapping,
+            $"X-Plex-Token: {token}",
+            outputFormatOverride: body.OutputFormat,
+            ct);
         return Results.Json(new
         {
             frontUrl = result.FrontUrl,
@@ -288,6 +298,7 @@ public sealed record PlexPrepareRequest(
     int? FrontL = null,
     int? FrontR = null,
     int? BackL = null,
-    int? BackR = null);
+    int? BackR = null,
+    string? OutputFormat = null);
 
 public partial class Program;

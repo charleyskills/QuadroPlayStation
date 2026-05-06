@@ -14,7 +14,7 @@
                             <span class="np-peer-track">@peer.Title</span>
                         }
                     </div>
-                    @if (peer.Phase == "buffering" && peer.Progress > 0)
+                    @if (peer is { Phase: "buffering", Progress: > 0 })
                     {
                         <div class="np-peer-bar">
                             <div class="np-peer-bar-fill" style="width:@($"{peer.Progress * 100:F0}%")"></div>
