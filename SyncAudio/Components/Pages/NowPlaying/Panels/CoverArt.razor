@@ -1,0 +1,27 @@
+<div class="np-cover">
+    <div class="np-cover-square">
+        @if (CurrentTrack?.CoverUrl is { } coverUrl)
+        {
+            <img class="np-cover-square__img" src="@coverUrl" alt="@CurrentTrack.Album" draggable="false" />
+        }
+        else
+        {
+            <div class="np-cover-square__grain"></div>
+            <div class="np-cover-square__type">
+                <div class="np-cover-square__side">SIDE A · 1973</div>
+                <div>
+                    <div class="np-cover-square__title-1">Sunset</div>
+                    <div class="np-cover-square__title-2">Telegraph</div>
+                </div>
+                <div class="np-cover-square__foot">
+                    <span>@(CurrentTrack?.Artist.ToUpperInvariant() ?? "—")</span>
+                    <span class="np-cover-square__foot-num">09 / 12</span>
+                </div>
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    [Parameter] public Track? CurrentTrack { get; set; }
+}

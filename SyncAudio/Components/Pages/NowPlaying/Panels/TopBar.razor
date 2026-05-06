@@ -1,0 +1,47 @@
+<div class="np-topbar">
+    <button class="np-pill np-pill--plex" type="button" title="Plex library"
+            @onclick="OnTogglePlex">
+        <img src="https://support.plex.tv/wp-content/themes/plex/assets/img/plex-logo.svg"
+             class="np-plex-logo" alt="Plex" />
+    </button>
+
+    <div class="np-pill np-pill--center">
+        @if (IsJoined)
+        {
+            <div class="np-pill-eyebrow">@MemberCount @ListenerWord · @GroupName</div>
+            <div class="np-pill-main">@AlbumName@StatusSuffix</div>
+        }
+        else
+        {
+            <div class="np-pill-eyebrow">PLAYING FROM</div>
+            <div class="np-pill-main">@AlbumName@StatusSuffix</div>
+        }
+    </div>
+
+    <button class="np-pill np-pill--icon" type="button" disabled aria-label="More" title="More">
+        <svg width="18" height="5" viewBox="0 0 22 6" aria-hidden="true">
+            <circle cx="3" cy="3" r="2.5" fill="rgba(255,255,255,0.7)"/>
+            <circle cx="11" cy="3" r="2.5" fill="rgba(255,255,255,0.7)"/>
+            <circle cx="19" cy="3" r="2.5" fill="rgba(255,255,255,0.7)"/>
+        </svg>
+    </button>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public string AlbumName { get; set; } = "";
+    [Parameter] public bool IsJoined { get; set; }
+    [Parameter] public int MemberCount { get; set; }
+    [Parameter] public string GroupName { get; set; } = "";
+    [Parameter] public bool IsSplitting { get; set; }
+    [Parameter] public bool IsBuffering { get; set; }
+    [Parameter] public bool IsWaitingForPeers { get; set; }
+    [Parameter] public EventCallback OnTogglePlex { get; set; }
+
+    private string ListenerWord => MemberCount == 1 ? "LISTENER" : "LISTENERS";
+
+    private string StatusSuffix =>
+        IsSplitting ? " · SPLITTING…"
+        : IsBuffering ? " · BUFFERING…"
+        : IsWaitingForPeers ? " · WAITING FOR PEERS…"
+        : "";
+}

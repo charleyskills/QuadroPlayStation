@@ -1,0 +1,42 @@
+@if (IsJoined)
+{
+    <div class="np-peers-overlay @(ShowPeersPanel ? "np-peers-overlay--visible" : "")">
+        <div class="np-peers-panel">
+            <div class="np-peers-label">DEVICES</div>
+            @foreach (var peer in Peers.Where(p => p.Phase is "splitting" or "buffering" or "ready" or "playing"))
+            {
+                <div class="np-peer-row">
+                    <div class="np-peer-row__left">
+                        <span class="np-peer-name">@peer.Name@(peer.IsSelf ? " ·" : "")</span>
+                        <span class="np-peer-phase np-peer-phase--@peer.Phase">@PeerPhaseLabel(peer.Phase)</span>
+                        @if (!string.IsNullOrEmpty(peer.Title))
+                        {
+                            <span class="np-peer-track">@peer.Title</span>
+                        }
+                    </div>
+                    @if (peer.Phase == "buffering" && peer.Progress > 0)
+                    {
+                        <div class="np-peer-bar">
+                            <div class="np-peer-bar-fill" style="width:@($"{peer.Progress * 100:F0}%")"></div>
+                        </div>
+                    }
+                </div>
+            }
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public bool IsJoined { get; set; }
+    [Parameter] public bool ShowPeersPanel { get; set; }
+    [Parameter] public IReadOnlyList<NowPlayingState.PeerState> Peers { get; set; } = [];
+
+    private static string PeerPhaseLabel(string phase) => phase switch
+    {
+        "splitting" => "TRANSCODING",
+        "buffering" => "BUFFERING",
+        "ready"     => "READY",
+        "playing"   => "PLAYING",
+        _           => string.Empty,
+    };
+}

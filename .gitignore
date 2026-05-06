@@ -1,0 +1,34 @@
+# ---- .NET build outputs ----
+**/bin/
+**/obj/
+*.user
+*.suo
+*.userprefs
+.vs/
+
+# ---- IDEs / editors ----
+.idea/
+.vscode/
+
+# ---- Claude Code local config ----
+.claude/settings.local.json
+.claude/launch.json
+
+# ---- Test / coverage ----
+TestResults/
+coverage/
+*.coverage
+*.coveragexml
+
+# ---- Logs / temp ----
+*.log
+*.tmp
+*.swp
+
+# ---- App runtime data (regenerated on disk) ----
+SyncAudio/App_Data/cover-cache/
+SyncAudio/App_Data/keys/
+SyncAudio/App_Data/plex-client-id
+
+# ---- ffmpeg quadro split cache ----
+SyncAudio/wwwroot/audio/.split/

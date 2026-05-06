@@ -1,0 +1,61 @@
+<div class="np-album">
+    <div class="np-album-header">
+        <div class="np-album-header-left">
+            @if (CurrentTrack?.CoverUrl is { } headerCover)
+            {
+                <img class="np-album-mini-cover" style="object-fit: cover;" src="@headerCover" alt="" draggable="false" />
+            }
+            else
+            {
+                <div class="np-album-mini-cover"></div>
+            }
+            <div class="np-album-name">@AlbumName</div>
+        </div>
+        <div class="np-album-count">@Tracks.Count track@(Tracks.Count == 1 ? "" : "s")</div>
+    </div>
+
+    <div class="np-album-list">
+        @if (Tracks.Count == 0)
+        {
+            <div class="np-empty">No tracks loaded.</div>
+        }
+        else
+        {
+            @for (var i = 0; i < Tracks.Count; i++)
+            {
+                var t = Tracks[i];
+                var isCurrent = CurrentTrack is not null && t.Id == CurrentTrack.Id;
+                var rowNumber = i + 1;
+                <button type="button"
+                        class="np-album-row @(isCurrent ? "np-album-row--current" : "")"
+                        @onclick="@(() => OnTrackClick.InvokeAsync(t))">
+                    <span class="np-album-row__num">
+                        @if (isCurrent)
+                        {
+                            <span class="np-eqbars @(IsPlaying ? "" : "np-eqbars--paused")">
+                                <span></span><span></span><span></span>
+                            </span>
+                        }
+                        else
+                        {
+                            <span>@rowNumber</span>
+                        }
+                    </span>
+                    <div class="np-album-row__text">
+                        <div class="np-album-row__title">@t.Title</div>
+                        <div class="np-album-row__artist">@t.Artist</div>
+                    </div>
+                    <span class="np-album-row__dur">@t.DurationDisplay</span>
+                </button>
+            }
+        }
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public IReadOnlyList<Track> Tracks { get; set; } = [];
+    [Parameter] public Track? CurrentTrack { get; set; }
+    [Parameter, EditorRequired] public string AlbumName { get; set; } = "";
+    [Parameter] public bool IsPlaying { get; set; }
+    [Parameter] public EventCallback<Track> OnTrackClick { get; set; }
+}

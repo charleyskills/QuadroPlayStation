@@ -1,0 +1,35 @@
+<div class="np-track-header">
+    <div class="np-title">@(CurrentTrack?.Title ?? "No track")</div>
+    <div class="np-artist">@(CurrentTrack?.Artist ?? "")</div>
+</div>
+
+@if (IsLossless || IsSpatial || Channels > 0)
+{
+    <div class="np-badges">
+        @if (IsLossless)
+        {
+            <span class="np-badge">LOSSLESS</span>
+        }
+        @if (IsSpatial)
+        {
+            <span class="np-badge">
+                <svg width="11" height="11" viewBox="0 0 12 12" fill="none">
+                    <circle cx="6" cy="6" r="2" fill="#fff"/>
+                    <path d="M2 6a4 4 0 018 0M0.5 6a5.5 5.5 0 0111 0" stroke="#fff" stroke-width="1.2" fill="none" stroke-linecap="round"/>
+                </svg>
+                SPATIAL AUDIO
+            </span>
+        }
+        @if (Channels > 0)
+        {
+            <span class="np-badge">@Channels CH</span>
+        }
+    </div>
+}
+
+@code {
+    [Parameter] public Track? CurrentTrack { get; set; }
+    [Parameter] public bool IsLossless { get; set; }
+    [Parameter] public bool IsSpatial { get; set; }
+    [Parameter] public int Channels { get; set; }
+}

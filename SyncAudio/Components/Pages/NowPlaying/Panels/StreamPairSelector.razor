@@ -1,0 +1,190 @@
+@using SyncAudio.Services.TrackSplit
+
+<div class="np-pair-row">
+    @if (_expanded)
+    {
+        <button type="button"
+                class="np-pair-btn @(SelectedPair == "Front" ? "np-pair-btn--active" : "")"
+                @onclick="@(() => SelectAsync("Front"))"
+                title="This device plays the FRONT pair (channels @FrontMappingLabel)">
+            <span class="np-pair-label">FRONT</span>
+            <span class="np-pair-sub">L · R</span>
+        </button>
+        <button type="button"
+                class="np-pair-btn @(SelectedPair == "Back" ? "np-pair-btn--active" : "")"
+                @onclick="@(() => SelectAsync("Back"))"
+                title="This device plays the BACK pair (channels @BackMappingLabel)">
+            <span class="np-pair-label">BACK</span>
+            <span class="np-pair-sub">L · R</span>
+        </button>
+    }
+    else
+    {
+        <button type="button"
+                class="np-pair-chip"
+                @onclick="@(() => _expanded = true)"
+                title="Tap to change stream pair">
+            <span class="np-pair-chip-label">@SelectedPair.ToUpperInvariant()</span>
+            <span class="np-pair-chip-sub">L · R</span>
+            <svg class="np-pair-chip-chevron" width="10" height="10" viewBox="0 0 10 10" fill="currentColor">
+                <path d="M2 3.5 L5 6.5 L8 3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" fill="none"/>
+            </svg>
+        </button>
+    }
+</div>
+
+<div class="np-pair-advanced">
+    <button type="button"
+            class="np-pair-advanced-toggle"
+            @onclick="@(() => _advancedOpen = !_advancedOpen)"
+            title="Manually pick which source channels feed each pair">
+        <span>Advanced</span>
+        <svg class="@(_advancedOpen ? "np-pair-advanced-chev np-pair-advanced-chev--open" : "np-pair-advanced-chev")"
+             width="10" height="10" viewBox="0 0 10 10" fill="currentColor">
+            <path d="M2 3.5 L5 6.5 L8 3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" fill="none"/>
+        </svg>
+    </button>
+
+    @if (_advancedOpen)
+    {
+        <div class="np-pair-advanced-body">
+            <div class="np-pair-source-line">
+                @if (SourceChannelCount is { } cc)
+                {
+                    <span><strong>Source:</strong> @(SourceChannelLayout ?? "?"), @cc ch</span>
+                }
+                else
+                {
+                    <span class="np-pair-source-pending">Detecting source channels…</span>
+                }
+                @if (HasOverride)
+                {
+                    <span class="np-pair-override-tag">override</span>
+                }
+            </div>
+
+            @if (SourceChannelCount is { } count && count > 0)
+            {
+                var working = WorkingMapping ?? new ChannelMapping(0, Math.Min(1, count - 1), 0, Math.Min(1, count - 1));
+
+                <div class="np-pair-grid">
+                    @ChannelPicker("Front L", working.FrontL, count, v => UpdateWorking(working with { FrontL = v }))
+                    @ChannelPicker("Front R", working.FrontR, count, v => UpdateWorking(working with { FrontR = v }))
+                    @ChannelPicker("Back L",  working.BackL,  count, v => UpdateWorking(working with { BackL  = v }))
+                    @ChannelPicker("Back R",  working.BackR,  count, v => UpdateWorking(working with { BackR  = v }))
+                </div>
+
+                <div class="np-pair-actions">
+                    <button type="button"
+                            class="np-pair-action np-pair-action--apply"
+                            disabled="@(!CanApply(working))"
+                            @onclick="@(() => ApplyAsync(working))">
+                        Apply
+                    </button>
+                    <button type="button"
+                            class="np-pair-action"
+                            disabled="@(!HasOverride)"
+                            @onclick="ResetAsync">
+                        Reset to auto
+                    </button>
+                </div>
+
+                <p class="np-pair-hint">Both devices must pick the matching pair files. If the back-pair sounds wrong on a 5.1 vs 7.1 source, try BL/BR at 4/5 and 6/7.</p>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter] public string SelectedPair { get; set; } = "Front";
+    [Parameter] public EventCallback<string> OnPairSelected { get; set; }
+
+    [Parameter] public int? SourceChannelCount { get; set; }
+    [Parameter] public string? SourceChannelLayout { get; set; }
+    [Parameter] public ChannelMapping? CurrentMapping { get; set; }
+    [Parameter] public bool HasOverride { get; set; }
+    [Parameter] public EventCallback<ChannelMapping> OnMappingApplied { get; set; }
+    [Parameter] public EventCallback OnMappingReset { get; set; }
+
+    private bool _expanded;
+    private bool _advancedOpen;
+    private ChannelMapping? _localWorking;
+
+    /// <summary>Editable copy of the mapping while the Advanced panel is open. Falls through to CurrentMapping when not yet edited.</summary>
+    private ChannelMapping? WorkingMapping => _localWorking ?? CurrentMapping;
+
+    protected override void OnParametersSet()
+    {
+        // When the parent's mapping changes (e.g. after Apply/Reset round-trips
+        // through the splitter), drop any stale local edit so the panel re-syncs.
+        if (_localWorking is not null && CurrentMapping is not null && _localWorking == CurrentMapping)
+        {
+            _localWorking = null;
+        }
+    }
+
+    private string FrontMappingLabel =>
+        CurrentMapping is { } m ? $"{m.FrontL}/{m.FrontR}" : "0/1";
+
+    private string BackMappingLabel =>
+        CurrentMapping is { } m ? $"{m.BackL}/{m.BackR}" : "4/5 or 2/3";
+
+    private async Task SelectAsync(string pair)
+    {
+        await OnPairSelected.InvokeAsync(pair);
+        _expanded = false;
+    }
+
+    private void UpdateWorking(ChannelMapping next) => _localWorking = next;
+
+    private bool CanApply(ChannelMapping working)
+        => CurrentMapping is null || working != CurrentMapping;
+
+    private async Task ApplyAsync(ChannelMapping working)
+    {
+        await OnMappingApplied.InvokeAsync(working);
+        _localWorking = null;
+    }
+
+    private async Task ResetAsync()
+    {
+        await OnMappingReset.InvokeAsync();
+        _localWorking = null;
+    }
+
+    private static string ChannelLabel(int index, int total, string? layout)
+    {
+        // ffmpeg conventional ordering for the layouts we recognise. Falls back
+        // to a bare index when the layout doesn't match anything we know.
+        var l = layout?.Trim().ToLowerInvariant();
+        string[]? names = l switch
+        {
+            "stereo" => ["FL", "FR"],
+            "mono" => ["FC"],
+            "quad" or "quadraphonic" => ["FL", "FR", "BL", "BR"],
+            "5.0" => ["FL", "FR", "FC", "BL", "BR"],
+            "5.1" or "5.1(rear)" => ["FL", "FR", "FC", "LFE", "BL", "BR"],
+            "5.1(side)" => ["FL", "FR", "FC", "LFE", "SL", "SR"],
+            "7.1" => ["FL", "FR", "FC", "LFE", "BL", "BR", "SL", "SR"],
+            "7.1(wide)" => ["FL", "FR", "FC", "LFE", "BL", "BR", "FLC", "FRC"],
+            _ => null,
+        };
+        if (names is not null && index >= 0 && index < names.Length)
+            return $"{index} ({names[index]})";
+        return index.ToString();
+    }
+
+    private RenderFragment ChannelPicker(string label, int value, int count, Action<int> onChange) => __builder =>
+    {
+        <label class="np-pair-picker">
+            <span class="np-pair-picker-label">@label</span>
+            <select class="np-pair-picker-select"
+                    @onchange="@(e => onChange(int.TryParse(e.Value?.ToString(), out var v) ? v : 0))">
+                @for (var i = 0; i < count; i++)
+                {
+                    <option value="@i" selected="@(i == value)">@ChannelLabel(i, count, SourceChannelLayout)</option>
+                }
+            </select>
+        </label>
+    };
+}

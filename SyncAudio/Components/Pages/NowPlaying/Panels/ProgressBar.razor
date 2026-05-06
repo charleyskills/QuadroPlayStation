@@ -1,0 +1,22 @@
+<div class="np-progress">
+    <div class="np-track @(IsBuffering ? "is-buffering" : "")">
+        @if (IsBuffering && BufferedProgress > 0)
+        {
+            <div class="np-buffer" style="width: @($"{BufferedProgress * 100:F0}%")"></div>
+        }
+        <div class="np-fill" style="width: @($"{ProgressFraction * 100:F2}%")"></div>
+        <div class="np-knob" style="left: @($"{ProgressFraction * 100:F2}%")"></div>
+    </div>
+    <div class="np-time-row">
+        <span>@ElapsedDisplay</span>
+        <span>@RemainingDisplay</span>
+    </div>
+</div>
+
+@code {
+    [Parameter] public double ProgressFraction { get; set; }
+    [Parameter] public double BufferedProgress { get; set; }
+    [Parameter] public bool IsBuffering { get; set; }
+    [Parameter] public string ElapsedDisplay { get; set; } = "";
+    [Parameter] public string RemainingDisplay { get; set; } = "";
+}

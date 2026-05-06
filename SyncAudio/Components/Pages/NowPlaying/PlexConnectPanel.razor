@@ -1,0 +1,168 @@
+@using System.Text.Json
+@inject IJSRuntime JS
+@inject ILogger<PlexConnectPanel> Logger
+@implements IAsyncDisposable
+
+<div class="plex-panel @(IsConnected ? "connected" : "disconnected")">
+    @if (!IsConnected)
+    {
+        @if (_pinCode is null)
+        {
+            <button class="plex-btn" type="button" @onclick="StartLink" disabled="@_starting">
+                @(_starting ? "Connecting…" : "Connect Plex")
+            </button>
+            @if (_lastError is not null)
+            {
+                <div class="plex-error">@_lastError</div>
+            }
+        }
+        else
+        {
+            <div class="plex-link-row">
+                <div class="plex-code">CODE: <strong>@_pinCode</strong></div>
+                <a class="plex-link" href="https://plex.tv/link/?code=@_pinCode" target="_blank" rel="noopener">Open plex.tv/link</a>
+            </div>
+            <div class="plex-status">@(_pollingMessage ?? "Waiting for you to enter the code…")</div>
+            <button class="plex-btn-link" type="button" @onclick="CancelLink">Cancel</button>
+        }
+    }
+    else
+    {
+        <div class="plex-status">
+            Connected@(string.IsNullOrEmpty(Username) ? "" : $" as {Username}")
+        </div>
+        <button class="plex-btn-link" type="button" @onclick="HandleLogout">Disconnect</button>
+    }
+</div>
+
+@code {
+    [Parameter] public bool IsConnected { get; set; }
+    [Parameter] public string? Username { get; set; }
+    [Parameter] public EventCallback OnConnected { get; set; }
+    [Parameter] public EventCallback OnDisconnected { get; set; }
+
+    private bool _starting;
+    private string? _pinCode;
+    private long? _pinId;
+    private string? _pollingMessage;
+    private string? _lastError;
+    private CancellationTokenSource? _pollCts;
+
+    private async Task StartLink()
+    {
+        _starting = true;
+        _lastError = null;
+        StateHasChanged();
+        try
+        {
+            var raw = await JS.InvokeAsync<JsonElement>("plexInterop.startAuth");
+            var pinId = raw.GetProperty("pinId").GetInt64();
+            var code = raw.GetProperty("code").GetString() ?? string.Empty;
+
+            _pinCode = code;
+            _pinId = pinId;
+            _pollingMessage = "Waiting for you to enter the code at plex.tv/link…";
+
+            try { await JS.InvokeVoidAsync("plexInterop.openLinkPage", code); }
+            catch (Exception ex) { Logger.LogDebug(ex, "Could not open plex.tv/link in a new tab"); }
+
+            _ = PollAsync(pinId);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to start Plex link flow");
+            _lastError = "Couldn't start Plex link. Try again.";
+            _pinCode = null;
+            _pinId = null;
+        }
+        finally
+        {
+            _starting = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task PollAsync(long pinId)
+    {
+        _pollCts?.Cancel();
+        _pollCts = new CancellationTokenSource();
+        var ct = _pollCts.Token;
+
+        try
+        {
+            // Plex pins live for 30 minutes; poll every second.
+            var deadline = DateTimeOffset.UtcNow.AddMinutes(30);
+            while (!ct.IsCancellationRequested && DateTimeOffset.UtcNow < deadline)
+            {
+                await Task.Delay(TimeSpan.FromSeconds(1), ct);
+                if (ct.IsCancellationRequested) return;
+
+                JsonElement raw;
+                try
+                {
+                    raw = await JS.InvokeAsync<JsonElement>("plexInterop.checkAuthStatus", ct, pinId);
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogDebug(ex, "Plex status poll error");
+                    continue;
+                }
+
+                var authenticated = raw.TryGetProperty("authenticated", out var a) && a.GetBoolean();
+                var expired = raw.TryGetProperty("expired", out var e) && e.GetBoolean();
+
+                if (authenticated)
+                {
+                    _pinCode = null;
+                    _pinId = null;
+                    _pollingMessage = null;
+                    _lastError = null;
+                    await InvokeAsync(StateHasChanged);
+                    await OnConnected.InvokeAsync();
+                    return;
+                }
+                if (expired)
+                {
+                    _pinCode = null;
+                    _pinId = null;
+                    _pollingMessage = null;
+                    _lastError = "Code expired. Try again.";
+                    await InvokeAsync(StateHasChanged);
+                    return;
+                }
+            }
+            if (!ct.IsCancellationRequested)
+            {
+                _pinCode = null;
+                _pinId = null;
+                _pollingMessage = null;
+                _lastError = "Timed out. Try again.";
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+        catch (TaskCanceledException) { /* user cancelled or component disposed */ }
+        catch (OperationCanceledException) { /* same */ }
+    }
+
+    private void CancelLink()
+    {
+        _pollCts?.Cancel();
+        _pinCode = null;
+        _pinId = null;
+        _pollingMessage = null;
+    }
+
+    private async Task HandleLogout()
+    {
+        try { await JS.InvokeVoidAsync("plexInterop.logout"); }
+        catch (Exception ex) { Logger.LogWarning(ex, "Plex logout request failed"); }
+        await OnDisconnected.InvokeAsync();
+    }
+
+    public ValueTask DisposeAsync()
+    {
+        _pollCts?.Cancel();
+        _pollCts?.Dispose();
+        return ValueTask.CompletedTask;
+    }
+}

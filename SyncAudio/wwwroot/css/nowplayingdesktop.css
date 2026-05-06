@@ -1,0 +1,59 @@
+/* ============================================================
+   NowPlayingDesktop — 2-column layout
+   Scoped under .npd-stage (added alongside .np-stage).
+   Reuses all np-* tokens and component styles from nowplaying.css.
+   ============================================================ */
+
+/* ─── Outer stage: flex column, full viewport, no outer scroll ─── */
+.npd-stage {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    overflow: hidden;
+}
+
+/* ─── Top bar: full-width, sits above the 2-column body ─── */
+.npd-header {
+    position: relative;
+    z-index: 10;
+    flex: 0 0 auto;
+}
+
+/* ─── 2-column body ─── */
+.npd-body {
+    position: relative;
+    z-index: 1;
+    flex: 1 1 0;
+    display: grid;
+    grid-template-columns: 45fr 55fr;
+    overflow: hidden;
+    min-height: 0;
+}
+
+/* ─── Left column: large cover art, centered ─── */
+.npd-left {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 32px 24px 32px 48px;
+    min-height: 0;
+}
+
+/* Cover fills the left column up to a max size */
+.npd-left .np-cover {
+    padding: 0;
+    width: 100%;
+    max-width: 560px;
+}
+
+/* ─── Right column: scrollable controls panel ─── */
+.npd-right {
+    overflow-y: auto;
+    padding: 8px 48px 48px 24px;
+    min-height: 0;
+}
+
+/* Give the track header a bit more breathing room on desktop */
+.npd-right .np-track-header {
+    padding-top: 8px;
+}
