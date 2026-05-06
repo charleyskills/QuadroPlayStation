@@ -76,9 +76,6 @@
                                OnTogglePlay="@(() => _context.Logic.TogglePlayAsync())"
                                OnNext="@(() => _context.Logic.NextAsync())" />
 
-            <VolumeControl Volume="state.Volume"
-                           OnVolumeChanged="@(v => _context.Logic.SetVolumeAsync(v))" />
-
             <div class="np-pair-sync-bar">
                 <div class="np-pair-sync-bar__selector">
                     <StreamPairSelector SelectedPair="@state.SelectedStreamPair"
@@ -142,6 +139,8 @@
                Albums="state.PlexAlbumResults"
                AlbumTotal="state.PlexAlbumTotal"
                HasMore="state.HasMorePlexAlbums"
+               PlexSearchQuery="@state.PlexSearchQuery"
+               OnSearch="@(q => _context.Logic.SearchPlexAlbumsAsync(q))"
                OnTogglePanel="@(() => _context.Logic.TogglePlexPanelAsync())"
                OnToggleDiscoverView="@(() => _context.Logic.ToggleDiscoverViewAsync())"
                OnRefreshAlbums="@(() => _context.Logic.RefreshDtsAlbumsAsync())"
@@ -158,6 +157,11 @@
             IsLoadingMore="state.IsPlexLoadingMore"
             OnAlbumSelect="@HandleDiscoverAlbumSelect"
             OnClose="@(() => _context.Logic.ToggleDiscoverViewAsync())" />
+    }
+
+    @if (state.ActiveConnectionToast is { } toast)
+    {
+        <div class="np-toast @(toast.IsError ? "np-toast--error" : "")">@toast.Message</div>
     }
 
 </div>

@@ -166,10 +166,13 @@ public sealed class NowPlayingLogic(
         {
             await JoinRequested.InvokeAsync();
             state.IsJoined = true;
+            state.ActiveConnectionToast = new NowPlayingState.ConnectionToast(false, $"Connected to {state.GroupName}");
         }
         catch (Exception ex)
         {
             logger.LogError(ex, "Failed to join group {Group}", state.GroupName);
+            var msg = ex.Message.Length > 120 ? ex.Message[..120] + "…" : ex.Message;
+            state.ActiveConnectionToast = new NowPlayingState.ConnectionToast(true, msg);
         }
     }
 
@@ -568,6 +571,17 @@ public sealed class NowPlayingLogic(
         await LoadDtsAlbumsAsync();
     }
 
+    public async Task SearchPlexAlbumsAsync(string query)
+    {
+        query = string.IsNullOrWhiteSpace(query) ? PlexFixedQuery : query.Trim();
+        state.PlexSearchQuery = query;
+        state.PlexAlbumResults = [];
+        state.PlexAlbumTotal = 0;
+        state.IsPlexSearching = true;
+        await OnStateHasChanged.InvokeAsync();
+        await PlexSearchRequested.InvokeAsync(query);
+    }
+
     /// <summary>
     /// Fires another page of results — invoked by the View when the bottom-of-list
     /// IntersectionObserver fires. Idempotent if a fetch is already in flight or there
@@ -581,7 +595,7 @@ public sealed class NowPlayingLogic(
 
         state.IsPlexLoadingMore = true;
         await OnStateHasChanged.InvokeAsync();
-        await PlexSearchRequested.InvokeAsync(PlexFixedQuery);
+        await PlexSearchRequested.InvokeAsync(state.PlexSearchQuery);
     }
 
     /// <summary>
@@ -612,7 +626,8 @@ public sealed class NowPlayingLogic(
         state.PlexAlbumTotal = total;
         state.IsPlexSearching = false;
         state.IsPlexLoadingMore = false;
-        cache.Set(DtsCacheKey(state.PlexUsername), (state.PlexAlbumResults, state.PlexAlbumTotal), DtsCacheTtl);
+        if (string.Equals(forQuery, PlexFixedQuery, StringComparison.Ordinal))
+            cache.Set(DtsCacheKey(state.PlexUsername), (state.PlexAlbumResults, state.PlexAlbumTotal), DtsCacheTtl);
         await OnStateHasChanged.InvokeAsync();
     }
 

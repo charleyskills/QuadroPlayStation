@@ -25,6 +25,15 @@
                         </svg>
                     </button>
                 }
+                <button class="sheet-discover-btn @(_searchOpen ? "sheet-discover-btn--active" : "")"
+                        type="button" title="Search"
+                        @onclick="OpenSearch">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+                         stroke="currentColor" stroke-width="2"
+                         stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                    </svg>
+                </button>
                 <button class="sheet-discover-btn" type="button"
                         title="Reload DTS albums from Plex"
                         disabled="@(IsPlexSearching || IsPlexLoadingMore)"
@@ -41,6 +50,17 @@
             <div class="sheet-spacer"></div>
         }
     </div>
+    @if (_searchOpen)
+    {
+        <div class="plex-search-bar">
+            <input class="plex-search-input" type="text" @bind="_searchDraft"
+                   @bind:event="oninput"
+                   @onkeydown="HandleSearchKeyDown"
+                   placeholder="Search Plex…" />
+            <button class="sheet-discover-btn" type="button" @onclick="SubmitSearch" title="Go">Go</button>
+            <button class="sheet-discover-btn" type="button" @onclick="CloseSearch" title="Cancel">✕</button>
+        </div>
+    }
     <div class="sheet-scroll">
         <div class="sheet-section plex-section-body">
             <PlexConnectPanel IsConnected="IsPlexConnected"
@@ -51,7 +71,7 @@
             {
                 @if (IsPlexSearching)
                 {
-                    <div class="empty-row">Loading DTS albums…</div>
+                    <div class="empty-row">Searching for "@PlexSearchQuery"…</div>
                 }
                 else if (Albums.Count > 0)
                 {
@@ -99,7 +119,7 @@
                 }
                 else
                 {
-                    <div class="empty-row">No DTS albums found in your Plex library.</div>
+                    <div class="empty-row">No results for "@PlexSearchQuery".</div>
                 }
             }
         </div>
@@ -122,10 +142,33 @@
     [Parameter] public int AlbumTotal { get; set; }
     [Parameter] public bool HasMore { get; set; }
 
+    [Parameter] public string PlexSearchQuery { get; set; } = "";
+    [Parameter] public EventCallback<string> OnSearch { get; set; }
+
     [Parameter] public EventCallback OnTogglePanel { get; set; }
     [Parameter] public EventCallback OnToggleDiscoverView { get; set; }
     [Parameter] public EventCallback OnRefreshAlbums { get; set; }
     [Parameter] public EventCallback OnPlexConnected { get; set; }
     [Parameter] public EventCallback OnPlexDisconnected { get; set; }
     [Parameter] public EventCallback<string> OnAlbumPlay { get; set; }
+
+    private bool _searchOpen;
+    private string _searchDraft = "";
+
+    private void OpenSearch() { _searchDraft = PlexSearchQuery; _searchOpen = true; }
+    private void CloseSearch() => _searchOpen = false;
+
+    private async Task SubmitSearch()
+    {
+        var q = _searchDraft.Trim();
+        if (string.IsNullOrEmpty(q)) return;
+        _searchOpen = false;
+        await OnSearch.InvokeAsync(q);
+    }
+
+    private async Task HandleSearchKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") await SubmitSearch();
+        else if (e.Key == "Escape") CloseSearch();
+    }
 }

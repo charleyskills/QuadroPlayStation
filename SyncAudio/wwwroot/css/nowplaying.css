@@ -1267,6 +1267,25 @@ img.mini-cover { background: #1a0a2e; }
     height: 1px;
     width: 100%;
 }
+.plex-search-bar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+.plex-search-input {
+    flex: 1;
+    background: rgba(255, 255, 255, 0.08);
+    border: none;
+    border-radius: 6px;
+    color: #fff;
+    font-size: 13px;
+    padding: 5px 8px;
+    outline: none;
+}
+.plex-search-input::placeholder { color: rgba(255, 255, 255, 0.35); }
+.plex-search-input:focus { background: rgba(255, 255, 255, 0.14); }
 
 /* ─── Mobile (≤640px): drop the iOS frame, full-bleed scroll ─── */
 @media (max-width: 640px) {
@@ -1323,4 +1342,34 @@ img.mini-cover { background: #1a0a2e; }
     letter-spacing: 0.03em;
     color: rgba(255, 255, 255, 0.85);
     text-transform: uppercase;
+}
+
+/* ─── Connection toast ──────────────────────────────────────────────────── */
+.np-toast {
+    position: fixed;
+    bottom: 36px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 300;
+    padding: 10px 22px;
+    border-radius: 12px;
+    background: rgba(20, 20, 20, 0.88);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    color: #fff;
+    font-size: 14px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    white-space: nowrap;
+    pointer-events: none;
+    animation: np-toast-in 0.18s ease;
+}
+
+.np-toast--error {
+    background: rgba(180, 32, 32, 0.9);
+}
+
+@keyframes np-toast-in {
+    from { opacity: 0; transform: translateX(-50%) translateY(10px); }
+    to   { opacity: 1; transform: translateX(-50%) translateY(0); }
 }

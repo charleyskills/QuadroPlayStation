@@ -32,6 +32,7 @@ public abstract class NowPlayingBase : ComponentBase, IAsyncDisposable
     private bool _prevIsSplitting;
     private bool _prevIsJoined;
     protected bool _syncOpen;
+    private CancellationTokenSource? _toastDismissCts;
 
     // Subclasses override this to redirect to their own base route when no RoomId is provided.
     protected virtual string RoomIdRedirectRoute(string roomId) => $"/{roomId}";
@@ -242,6 +243,19 @@ public abstract class NowPlayingBase : ComponentBase, IAsyncDisposable
         if (!_prevIsJoined && s.IsJoined)
             _syncOpen = false;
         _prevIsJoined = s.IsJoined;
+
+        if (s.ActiveConnectionToast is { IsError: false })
+        {
+            _toastDismissCts?.Cancel();
+            _toastDismissCts = new CancellationTokenSource();
+            var cts = _toastDismissCts;
+            _ = Task.Delay(1000, cts.Token).ContinueWith(async t =>
+            {
+                if (t.IsCanceled) return;
+                _context.State.ActiveConnectionToast = null;
+                await InvokeAsync(StateHasChanged);
+            }, TaskScheduler.Default);
+        }
 
         if (_jsInitialized && s.IsSplitting != _prevIsSplitting)
         {
@@ -716,6 +730,8 @@ public abstract class NowPlayingBase : ComponentBase, IAsyncDisposable
             catch { /* circuit gone */ }
         }
 
+        _toastDismissCts?.Cancel();
+        _toastDismissCts?.Dispose();
         _selfRef?.Dispose();
     }
 }

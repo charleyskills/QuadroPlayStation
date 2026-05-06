@@ -100,6 +100,14 @@ public sealed class NowPlayingState
         set => SetProperty(ref field, value);
     }
 
+    public record ConnectionToast(bool IsError, string Message);
+
+    public ConnectionToast? ActiveConnectionToast
+    {
+        get;
+        set => SetPropertyAndNotify(ref field, value);
+    }
+
     public double PositionSeconds
     {
         get;
