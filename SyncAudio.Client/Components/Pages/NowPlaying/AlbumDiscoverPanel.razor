@@ -1,0 +1,79 @@
+@using SyncAudio.Core.Models
+@inject IJSRuntime JS
+@implements IAsyncDisposable
+
+<div class="discover-overlay" id="discover-container">
+
+    <button class="discover-close-btn" type="button" title="Back to list" @onclick="OnClose">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path d="M12 4L4 12M4 4l8 8" stroke="rgba(255,255,255,0.85)" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+    </button>
+
+    <div class="discover-scroll">
+        @foreach (var album in Albums)
+        {
+            <button class="album-card"
+                    type="button"
+                    disabled="@IsLoadingAlbum"
+                    @onclick="@(() => OnAlbumSelect.InvokeAsync(album.RatingKey))">
+
+                @if (album.CoverUrl is { } url)
+                {
+                    <img class="album-card__img"
+                         src="@NowPlayingHelpers.AsFullCover(url)"
+                         alt="@album.Title"
+                         draggable="false"
+                         crossorigin="anonymous" />
+                }
+                else
+                {
+                    <div class="album-card__img album-card__img--placeholder"></div>
+                }
+
+                <div class="album-card__overlay">
+                    <div class="album-card__title">@album.Title</div>
+                    <div class="album-card__artist">@album.Artist@(album.Year is { } y ? $" · {y}" : "")</div>
+                </div>
+
+            </button>
+        }
+
+        @if (HasMore)
+        {
+            <div id="discover-load-more-sentinel" class="discover-load-sentinel"></div>
+        }
+
+        @if (IsLoadingMore)
+        {
+            <div class="discover-loading-more">Loading more…</div>
+        }
+    </div>
+
+</div>
+
+@code {
+    [Parameter, EditorRequired] public IReadOnlyList<PlexAlbumSummary> Albums { get; set; } = [];
+    [Parameter] public bool IsLoadingAlbum { get; set; }
+    [Parameter] public bool HasMore { get; set; }
+    [Parameter] public bool IsLoadingMore { get; set; }
+    [Parameter] public EventCallback<string> OnAlbumSelect { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            await JS.InvokeVoidAsync("discoverInterop.installCardObserver", "discover-container");
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("discoverInterop.uninstallCardObserver", "discover-container");
+        }
+        catch { }
+    }
+}

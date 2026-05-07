@@ -1,0 +1,184 @@
+@page "/"
+@page "/{RoomId}"
+@rendermode InteractiveServer
+@inherits NowPlayingBase
+@using System.Text.Json
+@using SyncAudio.Core.Models
+@using SyncAudio.Client.Components.Pages.NowPlaying
+@using SyncAudio.Client.Components.Pages.NowPlaying.Panels
+@using SyncAudio.Core.Services.Plex
+
+@{
+    var state = _context.State;
+    var palette = state.ActivePalette;
+    var coverPaletteVar = $"--c0:{palette[0]};--c1:{palette[1]};--c2:{palette[2]};";
+    var albumName = state.CurrentTrack?.Album ?? "—";
+
+    // Inline album list: current track + same-album tracks from the queue.
+    // Works for local Library plays AND Plex album plays — OnPlexAlbumTracksAsync
+    // enqueues the album as the queue.
+    var current = state.CurrentTrack;
+    var albumTracks = state.AlbumTracks.Count > 0
+        ? state.AlbumTracks.ToArray()
+        : current is null
+            ? []
+            : new[] { current }
+                .Concat(state.Queue.Where(q => string.Equals(q.Album, current.Album, StringComparison.OrdinalIgnoreCase)))
+                .ToArray();
+}
+
+<div class="np-stage @(state.IsPlaying ? "np-stage--playing" : "")" style="@coverPaletteVar">
+
+    @if (state.ShowUnlockPrompt)
+    {
+        <div class="np-unlock-overlay" @onclick="HandleUnlockTap">
+            <span class="np-unlock-icon">&#9654;</span>
+            <span class="np-unlock-label">Tap to play</span>
+        </div>
+    }
+
+    <div class="np-bg-cover @(state.ActiveCoverSlot == 0 ? "np-bg-cover--active" : "")"
+         style="@(state.CoverSlot0 is { } s0 ? $"background-image:url('{s0}')" : "")"></div>
+    <div class="np-bg-cover @(state.ActiveCoverSlot == 1 ? "np-bg-cover--active" : "")"
+         style="@(state.CoverSlot1 is { } s1 ? $"background-image:url('{s1}')" : "")"></div>
+
+    <div class="np-frame">
+        <div class="np-scroll">
+
+            <TopBar AlbumName="@albumName"
+                    IsJoined="state.IsJoined"
+                    MemberCount="state.MemberCount"
+                    GroupName="@state.GroupName"
+                    IsSplitting="state.IsSplitting"
+                    IsBuffering="state.IsBuffering"
+                    IsWaitingForPeers="state.IsWaitingForPeers"
+                    OnTogglePlex="@(() => _context.Logic.TogglePlexPanelAsync())" />
+
+            <CoverArt CurrentTrack="state.CurrentTrack" />
+
+            <TrackHeader CurrentTrack="state.CurrentTrack"
+                         IsLossless="state.IsLossless"
+                         IsSpatial="state.IsSpatial"
+                         Channels="state.Channels" />
+
+            <ProgressBar ProgressFraction="state.ProgressFraction"
+                         BufferedProgress="state.BufferedProgress"
+                         IsBuffering="state.IsBuffering"
+                         ElapsedDisplay="@state.ElapsedDisplay"
+                         RemainingDisplay="@state.RemainingDisplay" />
+
+            <TransportControls CanPrevious="state.CanPrevious"
+                               CanNext="state.CanNext"
+                               CanTransport="state.CanTransport"
+                               IsPlaying="state.IsPlaying"
+                               IsBuffering="state.IsBuffering || state.IsSplitting || state.AnyPeerLoading"
+                               OnPrevious="@(() => _context.Logic.PreviousAsync())"
+                               OnTogglePlay="@(() => _context.Logic.TogglePlayAsync())"
+                               OnNext="@(() => _context.Logic.NextAsync())" />
+
+            <div class="np-pair-sync-bar">
+                <div class="np-pair-sync-bar__selector">
+                    <StreamPairSelector SelectedPair="@state.SelectedStreamPair"
+                                        OnPairSelected="@(p => _context.Logic.SelectStreamPairAsync(p))"
+                                        SourceChannelCount="@state.SourceChannelCount"
+                                        SourceChannelLayout="@state.SourceChannelLayout"
+                                        CurrentMapping="@(state.ChannelMappingOverride ?? state.EffectiveChannelMapping)"
+                                        HasOverride="@(state.ChannelMappingOverride is not null)"
+                                        OnMappingApplied="@(m => _context.Logic.SetChannelMappingAsync(m))"
+                                        OnMappingReset="@(() => _context.Logic.ResetChannelMappingAsync())" />
+                </div>
+                <button type="button"
+                        class="np-sync-toggle-btn @(_formatOpen ? "np-sync-toggle-btn--active" : "")"
+                        style="margin-right: 8px"
+                        @onclick="@(() => _formatOpen = !_formatOpen)">
+                    FORMAT
+                </button>
+                <button type="button"
+                        class="np-sync-toggle-btn @(state.IsJoined ? "np-sync-toggle-btn--connected" : "np-sync-toggle-btn--disconnected") @(_syncOpen ? "np-sync-toggle-btn--active" : "")"
+                        @onclick="@(() => _syncOpen = !_syncOpen)">
+                    SYNC
+                </button>
+            </div>
+
+            @if (_formatOpen)
+            {
+                <FormatDisclosure Selected="@state.OutputFormat"
+                                  OnFormatSelected="@(f => _context.Logic.SetOutputFormatAsync(f))" />
+            }
+
+            @if (_syncOpen)
+            {
+                <SyncDisclosure IsJoined="state.IsJoined"
+                                MemberCount="state.MemberCount"
+                                GroupName="@state.GroupName"
+                                IsSplitting="state.IsSplitting"
+                                IsBuffering="state.IsBuffering"
+                                OffsetMs="state.OffsetMs"
+                                LatencyOffsetMs="state.LatencyOffsetMs"
+                                Channels="state.Channels"
+                                LeftChannel="state.LeftChannel"
+                                RightChannel="state.RightChannel"
+                                OnJoin="@HandleJoin"
+                                OnAdjustLatency="@(d => _context.Logic.AdjustLatencyAsync(d))"
+                                OnChannelMap="@(m => _context.Logic.SetChannelMapAsync(m.Left, m.Right))" />
+            }
+
+            <div class="np-hairline"></div>
+
+            <AlbumTrackList Tracks="albumTracks"
+                            CurrentTrack="state.CurrentTrack"
+                            AlbumName="@albumName"
+                            IsPlaying="state.IsPlaying"
+                            OnTrackClick="@HandleAlbumRowClick" />
+
+            <div class="np-hairline"></div>
+
+        </div>
+    </div>
+
+    <PeersOverlay IsJoined="state.IsJoined"
+                  ShowPeersPanel="state.ShowPeersPanel"
+                  Peers="state.Peers" />
+
+    <PlexSheet ScrimClass="@state.PlexScrimClass"
+               SheetClass="@state.PlexSheetClass"
+               IsPlexConnected="state.IsPlexConnected"
+               PlexUsername="@state.PlexUsername"
+               IsPlexSearching="state.IsPlexSearching"
+               IsPlexLoadingMore="state.IsPlexLoadingMore"
+               IsPlexLoadingAlbum="state.IsPlexLoadingAlbum"
+               DiscoverViewOpen="state.DiscoverViewOpen"
+               Albums="state.PlexAlbumResults"
+               AlbumTotal="state.PlexAlbumTotal"
+               HasMore="state.HasMorePlexAlbums"
+               PlexSearchQuery="@state.PlexSearchQuery"
+               OnSearch="@(q => _context.Logic.SearchPlexAlbumsAsync(q))"
+               OnTogglePanel="@(() => _context.Logic.TogglePlexPanelAsync())"
+               OnToggleDiscoverView="@(() => _context.Logic.ToggleDiscoverViewAsync())"
+               OnRefreshAlbums="@(() => _context.Logic.RefreshDtsAlbumsAsync())"
+               OnPlexConnected="@HandlePlexConnected"
+               OnPlexDisconnected="@HandlePlexDisconnected"
+               OnAlbumPlay="@(rk => _context.Logic.PlayPlexAlbumAsync(rk))" />
+
+    @if (state.DiscoverViewOpen)
+    {
+        <AlbumDiscoverPanel
+            Albums="state.PlexAlbumResults"
+            IsLoadingAlbum="state.IsPlexLoadingAlbum"
+            HasMore="state.HasMorePlexAlbums"
+            IsLoadingMore="state.IsPlexLoadingMore"
+            OnAlbumSelect="@HandleDiscoverAlbumSelect"
+            OnClose="@(() => _context.Logic.ToggleDiscoverViewAsync())" />
+    }
+
+    @if (state.ActiveConnectionToast is { } toast)
+    {
+        <div class="np-toast @(toast.IsError ? "np-toast--error" : "")">@toast.Message</div>
+    }
+
+</div>
+
+@code {
+    protected override string? RedirectUrlForViewport(int viewportWidth)
+        => viewportWidth > 640 ? $"/desktop/{RoomId}" : null;
+}

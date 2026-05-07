@@ -17,7 +17,8 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\SyncAudio\SyncAudio.csproj" />
+    <ProjectReference Include="..\SyncAudio.Core\SyncAudio.Core.csproj" />
+    <ProjectReference Include="..\SyncAudio.Client\SyncAudio.Client.csproj" />
     <ProjectReference Include="..\SyncAudio.AppHost\SyncAudio.AppHost.csproj" />
   </ItemGroup>
 </Project>

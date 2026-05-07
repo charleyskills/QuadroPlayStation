@@ -1,11 +1,11 @@
 using Microsoft.AspNetCore.Components;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging.Abstractions;
-using SyncAudio.Components.Pages.NowPlaying;
-using SyncAudio.Components.Pages.NowPlaying.StateMachines;
-using SyncAudio.Models;
-using SyncAudio.Services;
-using SyncAudio.Services.TrackSplit;
+using SyncAudio.Client.Components.Pages.NowPlaying;
+using SyncAudio.Client.Components.Pages.NowPlaying.StateMachines;
+using SyncAudio.Core.Models;
+using SyncAudio.Core.Services;
+using SyncAudio.Core.Services.TrackSplit;
 using Xunit;
 
 namespace SyncAudio.Tests.Components.NowPlaying;
@@ -60,10 +60,10 @@ public class OutputFormatLogicTests
         CoverUrl: null, Source: TrackSource.Local, RemoteSourceUrl: null);
 
     [Fact]
-    public void Default_OutputFormat_is_mp3()
+    public void Default_OutputFormat_is_opus256()
     {
         var s = new NowPlayingState();
-        Assert.Equal("mp3", s.OutputFormat);
+        Assert.Equal("opus256", s.OutputFormat);
     }
 
     [Fact]
@@ -71,9 +71,9 @@ public class OutputFormatLogicTests
     {
         var (logic, state, splitter, rec) = BuildLogic(MakeTrack());
 
-        await logic.SetOutputFormatAsync("ogg");
+        await logic.SetOutputFormatAsync("wav");
 
-        Assert.Equal("mp3", state.OutputFormat);
+        Assert.Equal("opus256", state.OutputFormat);
         Assert.Empty(splitter.Calls);
         Assert.Empty(rec.BroadcastFormats);
         Assert.Equal(0, rec.PlayRequestedCount);
@@ -84,9 +84,9 @@ public class OutputFormatLogicTests
     {
         var (logic, state, splitter, rec) = BuildLogic(MakeTrack(), joined: true);
 
-        await logic.SetOutputFormatAsync("mp3");
+        await logic.SetOutputFormatAsync("opus256");
 
-        Assert.Equal("mp3", state.OutputFormat);
+        Assert.Equal("opus256", state.OutputFormat);
         Assert.Empty(splitter.Calls);
         Assert.Empty(rec.BroadcastFormats);
     }
@@ -105,6 +105,21 @@ public class OutputFormatLogicTests
         Assert.Single(splitter.Calls);
         Assert.Equal("flac", splitter.Calls[0].Format);
         // Was not playing → no restart.
+        Assert.Equal(0, rec.PlayRequestedCount);
+    }
+
+    [Fact]
+    public async Task SetOutputFormat_mp3_is_accepted_and_resplits()
+    {
+        var (logic, state, splitter, rec) = BuildLogic(MakeTrack(), joined: true);
+        state.OutputFormat = "flac"; // seed a non-default so switching to mp3 is a real change
+
+        await logic.SetOutputFormatAsync("mp3");
+
+        Assert.Equal("mp3", state.OutputFormat);
+        Assert.Equal(["mp3"], rec.BroadcastFormats);
+        Assert.Single(splitter.Calls);
+        Assert.Equal("mp3", splitter.Calls[0].Format);
         Assert.Equal(0, rec.PlayRequestedCount);
     }
 
@@ -143,9 +158,9 @@ public class OutputFormatLogicTests
     {
         var (logic, state, splitter, _) = BuildLogic(MakeTrack(), playing: true);
 
-        await logic.MirrorRemoteFormatChangeAsync("ogg");
+        await logic.MirrorRemoteFormatChangeAsync("wav");
 
-        Assert.Equal("mp3", state.OutputFormat);
+        Assert.Equal("opus256", state.OutputFormat);
         Assert.Empty(splitter.Calls);
     }
 
@@ -153,7 +168,8 @@ public class OutputFormatLogicTests
 
     private sealed class FakeLibrary(Track? track) : ITrackLibraryService
     {
-        public IReadOnlyList<Track> GetAll() => track is null ? [] : [track];
+        public Task<IReadOnlyList<Track>> GetAllAsync() =>
+            Task.FromResult<IReadOnlyList<Track>>(track is null ? [] : [track]);
     }
 
     private sealed class FakeSplitter : ITrackSplitService
@@ -167,7 +183,7 @@ public class OutputFormatLogicTests
             string? outputFormatOverride = null,
             CancellationToken ct = default)
         {
-            var fmt = outputFormatOverride ?? "mp3";
+            var fmt = outputFormatOverride ?? "opus256";
             Calls.Add((track.Id, fmt));
             return Task.FromResult(new TrackSplitResult(
                 FrontUrl: $"/audio/.split/{track.Id}/FL_FR.{fmt}",

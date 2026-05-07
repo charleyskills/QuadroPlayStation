@@ -1,4 +1,4 @@
-using SyncAudio.Services.Sync;
+using SyncAudio.Core.Services.Sync;
 using Xunit;
 
 namespace SyncAudio.Tests.Sync;

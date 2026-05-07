@@ -1,5 +1,5 @@
-using SyncAudio.Components.Pages.NowPlaying;
-using SyncAudio.Components.Pages.NowPlaying.StateMachines;
+using SyncAudio.Client.Components.Pages.NowPlaying;
+using SyncAudio.Client.Components.Pages.NowPlaying.StateMachines;
 using Xunit;
 
 namespace SyncAudio.Tests.Components.NowPlaying.StateMachines;
@@ -125,10 +125,10 @@ public class NowPlayingStateMachineIntegrationTests
 
         Assert.False(s.CanTransport); // no track yet
 
-        s.CurrentTrack = new SyncAudio.Models.Track(
+        s.CurrentTrack = new SyncAudio.Core.Models.Track(
             Id: "t1", Title: "T", Artist: "A", Album: "Alb", AudioUrl: "x.mp3",
             Duration: TimeSpan.FromSeconds(60), Palette: ["#000"], Lossless: false,
-            Spatial: false, CoverUrl: null, Source: SyncAudio.Models.TrackSource.Local,
+            Spatial: false, CoverUrl: null, Source: SyncAudio.Core.Models.TrackSource.Local,
             RemoteSourceUrl: null);
         // Joined+CurrentTrack but state == Idle (no transition into Splitting/Buffering/Ready/Playing yet)
         Assert.False(s.CanTransport);

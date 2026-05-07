@@ -1,4 +1,4 @@
-using SyncAudio.Components.Pages.NowPlaying.StateMachines;
+using SyncAudio.Client.Components.Pages.NowPlaying.StateMachines;
 using Xunit;
 
 namespace SyncAudio.Tests.Components.NowPlaying.StateMachines;

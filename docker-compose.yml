@@ -1,0 +1,56 @@
+services:
+  app:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      - Storage__Provider=Minio
+      - Storage__Minio__Endpoint=minio:9000
+      - Storage__Minio__AccessKey=minioadmin
+      - Storage__Minio__SecretKey=minioadmin
+      - Storage__Minio__UseSsl=false
+      - Plex__DataProtectionKeysDirectory=App_Data/keys
+      - Plex__ClientIdentifierFile=App_Data/plex-client-id
+    volumes:
+      - app-data:/app/App_Data
+    depends_on:
+      minio-init:
+        condition: service_completed_successfully
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio-data:/data
+    environment:
+      - MINIO_ROOT_USER=minioadmin
+      - MINIO_ROOT_PASSWORD=minioadmin
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+        mc alias set local http://minio:9000 minioadmin minioadmin &&
+        mc mb --ignore-existing local/syncaudio-audio &&
+        mc mb --ignore-existing local/syncaudio-splits &&
+        mc mb --ignore-existing local/syncaudio-covers &&
+        mc anonymous set none local/syncaudio-audio &&
+        mc anonymous set none local/syncaudio-splits &&
+        mc anonymous set none local/syncaudio-covers
+      "
+
+volumes:
+  minio-data:
+  app-data:

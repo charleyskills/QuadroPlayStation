@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+    <meta name="theme-color" content="#000000" />
+    <title>SyncAudio</title>
+    <base href="/" />
+    <link rel="stylesheet" href="css/app.css" />
+    <link rel="stylesheet" href="css/nowplaying.css" />
+    <link rel="stylesheet" href="css/nowplayingdesktop.css" />
+    <link rel="stylesheet" href="SyncAudio.Client.styles.css" />
+    <HeadOutlet />
+</head>
+<body>
+    <Routes />
+
+    <div id="components-reconnect-modal" aria-live="assertive" role="alertdialog">
+        <div class="rcm-backdrop"></div>
+        <div class="rcm-panel">
+            <div class="rcm-icon">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+                    <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"
+                          stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                </svg>
+            </div>
+            <div class="rcm-body">
+                <div class="rcm-title">Reconnecting…</div>
+                <div class="rcm-message">Lost connection to the server. Trying to reconnect.</div>
+            </div>
+            <div class="rcm-actions">
+                <button onclick="window.location.reload()" class="rcm-btn rcm-btn--reload">Reload</button>
+                <button onclick="Blazor.reconnect()" class="rcm-btn rcm-btn--retry">Retry</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="@Assets["lib/signalr/signalr.min.js"]"></script>
+    <script src="@Assets["js/syncAudio.js"]"></script>
+    <script src="@Assets["js/plexInterop.js"]"></script>
+    <script src="@Assets["js/discoverInterop.js"]"></script>
+    <script src="@Assets["js/nowPlayingScroll.js"]"></script>
+    <script src="_framework/blazor.web.js"></script>
+</body>
+</html>

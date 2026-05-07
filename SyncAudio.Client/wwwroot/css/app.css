@@ -1,0 +1,352 @@
+html {
+    background: #000;
+    scrollbar-gutter: stable;
+}
+
+body {
+    margin: 0;
+    background-color: #000;
+    scrollbar-width: auto;
+    scrollbar-color: #6e6e6e transparent;
+}
+
+.mud-main-content {
+    height: 100%;
+    min-height: 100vh;
+    display: flex;
+    padding-top: 0;
+    padding-bottom: 0;
+}
+
+#blazor-error-ui {
+    background-color: var(--mud-palette-error);
+    color: var(--mud-palette-error-text);
+    bottom: 0;
+    box-shadow: 0 -1px 2px rgba(0, 0, 0, 0.2);
+    display: none;
+    left: 0;
+    padding: 0.6rem 1.75rem 0.7rem 1.25rem;
+    position: fixed;
+    width: 100%;
+    z-index: 9999;
+}
+
+/* ─── Blazor reconnect modal — dark glass + shimmer ──────────── */
+
+@keyframes rcm-shimmer {
+    0%, 100% {
+        box-shadow:
+            0 0 0 1px rgba(255, 255, 255, 0.07),
+            0 8px 40px rgba(0, 0, 0, 0.6),
+            0 0 18px rgba(255, 255, 255, 0.04);
+    }
+    50% {
+        box-shadow:
+            0 0 0 1px rgba(255, 255, 255, 0.22),
+            0 8px 40px rgba(0, 0, 0, 0.6),
+            0 0 32px rgba(255, 255, 255, 0.12),
+            0 0 60px rgba(255, 255, 255, 0.05);
+    }
+}
+
+@keyframes rcm-icon-spin {
+    to { transform: rotate(360deg); }
+}
+
+#components-reconnect-modal {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 9999;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+}
+
+#components-reconnect-modal.components-reconnect-show {
+    display: flex;
+}
+
+.rcm-backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.65);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+}
+
+.rcm-panel {
+    position: relative;
+    background: rgba(18, 19, 21, 0.92);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+    border-radius: 20px;
+    padding: 24px 24px 20px;
+    width: min(100%, 340px);
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    font-family: -apple-system, "SF Pro Text", "SF Pro Display", system-ui, "Segoe UI", sans-serif;
+    -webkit-font-smoothing: antialiased;
+    color: #fff;
+    animation: rcm-shimmer 2.4s ease-in-out infinite;
+}
+
+.rcm-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    height: 44px;
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.07);
+    color: rgba(255, 255, 255, 0.7);
+    flex-shrink: 0;
+    animation: rcm-icon-spin 2s linear infinite;
+}
+
+.rcm-body {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+.rcm-title {
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    color: #fff;
+}
+
+.rcm-message {
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.55);
+    line-height: 1.45;
+}
+
+.rcm-actions {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+}
+
+.rcm-btn {
+    appearance: none;
+    border: 0;
+    border-radius: 999px;
+    padding: 7px 18px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: opacity 0.15s ease;
+    font-family: inherit;
+}
+
+.rcm-btn:active { opacity: 0.7; }
+
+.rcm-btn--reload {
+    background: rgba(255, 255, 255, 0.10);
+    color: rgba(255, 255, 255, 0.7);
+}
+
+.rcm-btn--retry {
+    background: #1DB954;
+    color: #000;
+}
+
+/* Failed / rejected states — swap shimmer to soft red, no auto-reload */
+#components-reconnect-modal.components-reconnect-failed .rcm-panel,
+#components-reconnect-modal.components-reconnect-rejected .rcm-panel {
+    animation: none;
+    box-shadow:
+        0 0 0 1px rgba(255, 143, 177, 0.25),
+        0 8px 40px rgba(0, 0, 0, 0.6),
+        0 0 30px rgba(255, 143, 177, 0.10);
+}
+
+#components-reconnect-modal.components-reconnect-failed .rcm-title::after {
+    content: " — Failed";
+    color: #FF8FB1;
+}
+
+#components-reconnect-modal.components-reconnect-rejected .rcm-title::after {
+    content: " — Session Expired";
+    color: #FF8FB1;
+}
+
+@keyframes glow-text {
+    0%, 100% {
+        text-shadow:
+            0 0 4px snow,
+            0 -10px 20px tomato,
+            -10px 10px 20px yellow,
+            10px 10px 20px tomato;
+    }
+    33% {
+        text-shadow:
+            0 0 4px snow,
+            0 -10px 20px cyan,
+            -10px 10px 20px tomato,
+            10px 10px 20px cyan;
+    }
+    66% {
+        text-shadow:
+            0 0 4px snow,
+            0 -10px 20px yellow,
+            -10px 10px 20px cyan,
+            10px 10px 20px yellow;
+    }
+}
+
+@keyframes glow-div {
+    0%, 100% {
+        box-shadow:
+            0 0 10px snow,
+            0 0 20px tomato,
+            0 0 30px yellow,
+            0 0 40px tomato;
+    }
+    33% {
+        box-shadow:
+            0 0 10px snow,
+            0 0 20px cyan,
+            0 0 30px tomato,
+            0 0 40px cyan;
+    }
+    66% {
+        box-shadow:
+            0 0 10px snow,
+            0 0 20px yellow,
+            0 0 30px cyan,
+            0 0 40px yellow;
+    }
+}
+
+@keyframes ticker-scroll {
+    0% {
+        transform: translateX(0);
+    }
+    100% {
+        /* Смещение на 50% ширины контейнера, так как список продублирован */
+        transform: translateX(-50%);
+    }
+}
+
+.glowing-text {
+    color: snow;
+    animation: glow-text 1s ease-in-out both infinite;
+}
+
+/******************************************************************************************************/
+
+/* ─── PEER LOADING OVERLAY ───────────────────────────────────────── */
+.np-peers-overlay {
+    position: fixed;
+    bottom: 0;
+    left: 50%;
+    width: min(100vw, 402px);
+    padding: 0 16px 24px;
+    pointer-events: none;
+    opacity: 0;
+    transform: translateX(-50%) translateY(8px);
+    transition: opacity 0.35s ease, transform 0.35s ease;
+    z-index: 20;
+}
+
+.np-peers-overlay--visible {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+}
+
+.np-peers-panel {
+    background: rgba(0, 0, 0, 0.48);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    border-radius: 12px;
+    padding: 10px 14px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+}
+
+.np-peers-label {
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.13em;
+    color: rgba(255, 255, 255, 0.4);
+    margin-bottom: 1px;
+}
+
+.np-peer-row {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.np-peer-row__left {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.np-peer-name {
+    font-size: 12px;
+    font-weight: 500;
+    color: rgba(255, 255, 255, 0.9);
+    white-space: nowrap;
+}
+
+.np-peer-track {
+    font-size: 10px;
+    opacity: 0.55;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 16ch;
+}
+
+.np-peer-phase {
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    padding: 2px 6px;
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.1);
+    color: rgba(255, 255, 255, 0.5);
+}
+
+.np-peer-phase--buffering {
+    color: #7eb8ff;
+    background: rgba(126, 184, 255, 0.15);
+}
+
+.np-peer-phase--splitting {
+    color: #ffb97e;
+    background: rgba(255, 185, 126, 0.15);
+}
+
+.np-peer-phase--ready {
+    color: #7effa5;
+    background: rgba(126, 255, 165, 0.15);
+}
+
+.np-peer-phase--playing {
+    color: #fff;
+    background: rgba(255, 255, 255, 0.18);
+}
+
+.np-peer-bar {
+    height: 3px;
+    background: rgba(255, 255, 255, 0.12);
+    border-radius: 2px;
+    overflow: hidden;
+}
+
+.np-peer-bar-fill {
+    height: 100%;
+    background: #7eb8ff;
+    border-radius: 2px;
+    transition: width 0.4s ease;
+}
+
+/**************************************************************/

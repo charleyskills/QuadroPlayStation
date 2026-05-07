@@ -9,7 +9,11 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\SyncAudio\SyncAudio.csproj" />
+    <PackageReference Include="CommunityToolkit.Aspire.Hosting.Minio" Version="13.1.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\SyncAudio.Client\SyncAudio.Client.csproj" />
   </ItemGroup>
 
 </Project>

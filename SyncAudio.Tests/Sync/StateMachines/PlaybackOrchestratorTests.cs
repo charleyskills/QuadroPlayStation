@@ -1,5 +1,5 @@
 using Microsoft.Extensions.Logging.Abstractions;
-using SyncAudio.Services.Sync.StateMachines;
+using SyncAudio.Core.Services.Sync.StateMachines;
 using Xunit;
 
 namespace SyncAudio.Tests.Sync.StateMachines;

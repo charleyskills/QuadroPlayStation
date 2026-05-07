@@ -1,8 +1,0 @@
-namespace SyncAudio.Services.Plex;
-
-public interface IPlexSessionStore
-{
-    PlexSession? Get();
-    void Set(PlexSession session);
-    void Clear();
-}
