@@ -116,8 +116,29 @@ public sealed class NowPlayingLogic(
         if (idx < 0) return;
 
         var track = state.Library[idx];
+        state.CurrentTrack = track;
+        state.UpdateCoverUrl(track.CoverUrl);
         state.Queue = state.Library.Skip(idx + 1).ToList();
-        await ChangeTrackAsync(track);
+        await OnStateHasChanged.InvokeAsync();
+    }
+
+    /// <summary>
+    /// Repositions within the already-loaded AlbumTracks list without triggering a split.
+    /// Used during page-open restore so the split runs lazily when the user presses PLAY.
+    /// </summary>
+    public async Task PositionToPlexTrackAsync(Track target)
+    {
+        var albumIdx = state.AlbumTracks.ToList().FindIndex(t => t.Id == target.Id);
+        if (albumIdx < 0) return;
+
+        state.HistoryIds.Clear();
+        for (var i = 0; i < albumIdx; i++)
+            state.HistoryIds.Add(state.AlbumTracks[i].Id);
+
+        state.CurrentTrack = target;
+        state.UpdateCoverUrl(target.CoverUrl);
+        state.Queue = state.AlbumTracks.Skip(albumIdx + 1).ToList();
+        await OnStateHasChanged.InvokeAsync();
     }
 
     /// <summary>
@@ -180,7 +201,7 @@ public sealed class NowPlayingLogic(
         }
         finally
         {
-            if (state.Machine.State == LocalDeviceState.Splitting)
+            if (state.Machine.IsSplitting)
                 state.Machine.Fire(failed ? LocalDeviceTrigger.SplitFailed : LocalDeviceTrigger.SplitDone);
             await OnStateHasChanged.InvokeAsync();
         }
@@ -188,7 +209,7 @@ public sealed class NowPlayingLogic(
 
     public async Task RequestJoinAsync()
     {
-        if (state.IsJoined) return;
+        if (state.Machine.IsJoined) return;
         if (string.IsNullOrWhiteSpace(state.GroupName)) return;
 
         try
@@ -205,6 +226,18 @@ public sealed class NowPlayingLogic(
         }
     }
 
+    public async Task LeaveGroupAsync()
+    {
+        if (!state.Machine.IsJoined) return;
+        if (state.Machine.IsPlaying)
+        {
+            try { await StopRequested.InvokeAsync(); } catch { }
+        }
+        state.Machine.Fire(LocalDeviceTrigger.Disconnected);
+        state.ActiveConnectionToast = null;
+        await OnStateHasChanged.InvokeAsync();
+    }
+
     public async Task TogglePlayAsync()
     {
         if (state.CurrentTrack is null)
@@ -213,7 +246,7 @@ public sealed class NowPlayingLogic(
             return;
         }
 
-        if (!state.IsJoined)
+        if (!state.Machine.IsJoined)
         {
             logger.LogDebug("TogglePlay ignored: not joined to a group");
             return;
@@ -221,10 +254,21 @@ public sealed class NowPlayingLogic(
 
         try
         {
-            if (state.IsPlaying)
+            if (state.Machine.IsPlaying)
+            {
                 await StopRequested.InvokeAsync();
-            else
+            }
+            else if (string.IsNullOrEmpty(state.FrontStreamUrl) && state.Machine.IsIdle)
+            {
+                // No split has run yet — start it now; wasPlaying=true so it auto-plays after split.
+                _trackEndedNaturally = true;
+                await ChangeTrackAsync(state.CurrentTrack, broadcastToGroup: state.Machine.IsJoined);
+            }
+            else if (!string.IsNullOrEmpty(state.FrontStreamUrl))
+            {
                 await PlayRequested.InvokeAsync();
+            }
+            // else: split in progress (Splitting/Buffering), wait for buffer ready
         }
         catch (Exception ex)
         {
@@ -235,7 +279,7 @@ public sealed class NowPlayingLogic(
     public async Task StopPlayAsync()
     {
         if (state.CurrentTrack is null) return;
-        if (!state.IsJoined) return;
+        if (!state.Machine.IsJoined) return;
 
         _trackEndedNaturally = false;
         try
@@ -260,7 +304,7 @@ public sealed class NowPlayingLogic(
 
         var nextTrack = state.Queue[0];
         state.Queue = state.Queue.Skip(1).ToList();
-        await ChangeTrackAsync(nextTrack, broadcastToGroup: state.IsJoined);
+        await ChangeTrackAsync(nextTrack, broadcastToGroup: state.Machine.IsJoined);
     }
 
     public async Task PreviousAsync()
@@ -279,10 +323,10 @@ public sealed class NowPlayingLogic(
             state.Queue = new[] { current }.Concat(state.Queue).ToList();
         }
 
-        await ChangeTrackAsync(prevTrack, broadcastToGroup: state.IsJoined);
+        await ChangeTrackAsync(prevTrack, broadcastToGroup: state.Machine.IsJoined);
     }
 
-    public async Task SelectFromQueueAsync(Track track)
+    public async Task SelectFromQueueAsync(Track track, bool play = false)
     {
         if (state.CurrentTrack?.Id == track.Id) return;
 
@@ -299,24 +343,29 @@ public sealed class NowPlayingLogic(
         }
         else
         {
-            var idx = state.Queue.ToList().FindIndex(t => t.Id == track.Id);
+            var queueList = state.Queue.ToList();
+            var idx = queueList.FindIndex(t => t.Id == track.Id);
             if (idx < 0) return;
 
             var current = state.CurrentTrack;
             if (current is not null)
                 state.HistoryIds.Add(current.Id);
 
-            var newQueue = state.Queue.ToList();
-            newQueue.RemoveAt(idx);
-            state.Queue = newQueue;
+            for (var i = 0; i < idx; i++)
+                state.HistoryIds.Add(queueList[i].Id);
+
+            state.Queue = queueList.Skip(idx + 1).ToList();
         }
 
-        await ChangeTrackAsync(track, broadcastToGroup: state.IsJoined);
+        if (play && !state.Machine.IsPlaying)
+            _trackEndedNaturally = true;
+
+        await ChangeTrackAsync(track, broadcastToGroup: state.Machine.IsJoined);
     }
 
-    private async Task ChangeTrackAsync(Track track, bool broadcastToGroup = false)
+    private async Task ChangeTrackAsync(Track track, bool broadcastToGroup = false, bool autoPlay = true)
     {
-        var wasPlaying = state.IsPlaying || _trackEndedNaturally;
+        var wasPlaying = autoPlay && (state.Machine.IsPlaying || _trackEndedNaturally);
         _trackEndedNaturally = false;
 
         state.CurrentTrack = track;
@@ -333,7 +382,7 @@ public sealed class NowPlayingLogic(
             if (broadcastToGroup)
                 await TrackSelectionBroadcastRequested.InvokeAsync(track.Id);
 
-            if (wasPlaying && state.IsJoined)
+            if (wasPlaying && state.Machine.IsJoined)
             {
                 await PlayRequested.InvokeAsync();
             }
@@ -398,19 +447,19 @@ public sealed class NowPlayingLogic(
         }
         if (string.Equals(state.OutputFormat, format, StringComparison.Ordinal)) return;
 
-        var wasPlaying = state.IsPlaying;
+        var wasPlaying = state.Machine.IsPlaying;
         state.OutputFormat = format;
 
         try
         {
-            if (state.IsJoined)
+            if (state.Machine.IsJoined)
                 await FormatSelectionBroadcastRequested.InvokeAsync(format);
 
             if (state.CurrentTrack is { } track)
             {
                 await SplitForCurrentTrackAsync(track);
 
-                if (wasPlaying && state.IsJoined)
+                if (wasPlaying && state.Machine.IsJoined)
                     await PlayRequested.InvokeAsync();
             }
 
@@ -493,7 +542,7 @@ public sealed class NowPlayingLogic(
 
     public async Task OnPlayStateChangedAsync(bool isPlaying)
     {
-        if (state.IsPlaying == isPlaying) return;
+        if (state.Machine.IsPlaying == isPlaying) return;
         // Machine clears IsWaitingForPeers via PlaybackBegan event on entry to Playing.
         var trigger = isPlaying ? LocalDeviceTrigger.PlayStarted : LocalDeviceTrigger.PlaybackEnded;
         if (state.Machine.CanFire(trigger)) state.Machine.Fire(trigger);
@@ -515,7 +564,7 @@ public sealed class NowPlayingLogic(
 
     public async Task OnReadyChangedAsync(bool isReady)
     {
-        if (state.IsReady == isReady) return;
+        if (state.Machine.IsReady == isReady) return;
         // isReady=true → BufferReady (Buffering→Ready, or Playing reentry); isReady=false → no-op
         // (the JS only reports false on track change, which is handled by the TrackSelected trigger
         // in SplitForCurrentTrackAsync).
@@ -526,7 +575,7 @@ public sealed class NowPlayingLogic(
 
     public async Task OnDecodeErrorAsync(string message)
     {
-        if (state.Machine.State != LocalDeviceState.Buffering) return;
+        if (!state.Machine.IsBuffering) return;
         state.Machine.Fire(LocalDeviceTrigger.SplitFailed);
         state.ActiveConnectionToast = new NowPlayingState.ConnectionToast(true,
             $"Audio decode failed: {message}");
@@ -773,11 +822,10 @@ public sealed class NowPlayingLogic(
     {
         if (string.IsNullOrEmpty(ratingKey)) return;
         state.IsPlexLoadingAlbum = true;
-        state.PlexPanelOpen = false;
         await OnStateHasChanged.InvokeAsync();
         await PlexAlbumPlayRequested.InvokeAsync(ratingKey);
 
-        if (state.IsJoined && !_mirroringRemote)
+        if (state.Machine.IsJoined && !_mirroringRemote)
             await AlbumSelectionBroadcastRequested.InvokeAsync(ratingKey);
     }
 
@@ -845,6 +893,23 @@ public sealed class NowPlayingLogic(
         await SplitForCurrentTrackAsync(track);
     }
 
+    /// <summary>
+    /// Called when the group signals this device to prepare for play and the device
+    /// already holds the correct track. Starts the split/buffer pipeline if it hasn't
+    /// run yet — e.g. the initial split was skipped because the machine was still
+    /// Disconnected during <see cref="InitializeAsync"/>.
+    /// </summary>
+    public async Task EnsureReadyForPlayAsync()
+    {
+        if (state.CurrentTrack is null) return;
+        if (state.Machine.IsReady) return;         // already buffered; JS will re-report 1.0
+        if (state.Machine.IsSplitting) return;     // split running; will complete and report
+        // FrontStreamUrl set means split is done and JS decode is in progress.
+        if (!string.IsNullOrEmpty(state.FrontStreamUrl)) return;
+        // No split result — kick off the pipeline now.
+        await SplitForCurrentTrackAsync(state.CurrentTrack);
+    }
+
     public double? ConsumePendingPlayAtMs()
     {
         var v = _pendingPlayAtMs;
@@ -869,7 +934,8 @@ public sealed class NowPlayingLogic(
 
     /// <summary>
     /// Called by the View once the album's tracks have been fetched. Replaces the queue
-    /// with the album, sets the first track as Now Playing, and kicks off the split.
+    /// with the album tracks. Does NOT change the current track, cover, or playback state —
+    /// those only update when the user explicitly selects a track.
     /// </summary>
     public async Task OnPlexAlbumTracksAsync(string ratingKey, IReadOnlyList<Track> tracks)
     {
@@ -882,24 +948,19 @@ public sealed class NowPlayingLogic(
             return;
         }
 
-        var current = state.CurrentTrack;
-        if (current is not null)
-        {
-            state.HistoryIds.Add(current.Id);
-        }
-
         state.AlbumTracks = tracks;
         state.HistoryIds.Clear();
 
-        var first = tracks[0];
-        state.Queue = tracks.Skip(1).ToList();
-        await ChangeTrackAsync(first);
+        _trackEndedNaturally = false;
+        state.Queue = tracks.ToList();
 
         if (_deferredRemoteTrackId is { } deferred)
         {
             _deferredRemoteTrackId = null;
             await MirrorRemoteTrackSelectionAsync(deferred);
         }
+
+        await OnStateHasChanged.InvokeAsync();
     }
 
     public async Task OnPlexAlbumTracksFailedAsync(string ratingKey, string reason)
@@ -931,7 +992,7 @@ public sealed class NowPlayingLogic(
         if (channelCount is { } c) state.SourceChannelCount = c;
         if (channelLayout is not null) state.SourceChannelLayout = channelLayout;
         if (effectiveMapping is not null) state.EffectiveChannelMapping = effectiveMapping;
-        if (state.Machine.State == LocalDeviceState.Splitting)
+        if (state.Machine.IsSplitting)
             state.Machine.Fire(LocalDeviceTrigger.SplitDone);
         await CurrentTrackOnChanged.InvokeAsync(state.CurrentTrack);
         await OnStateHasChanged.InvokeAsync();
@@ -941,7 +1002,7 @@ public sealed class NowPlayingLogic(
     {
         if (state.CurrentTrack?.Id != trackId) return;
         logger.LogWarning("Plex prepare failed for {TrackId}: {Reason}", trackId, reason);
-        if (state.Machine.State == LocalDeviceState.Splitting)
+        if (state.Machine.IsSplitting)
             state.Machine.Fire(LocalDeviceTrigger.SplitFailed);
         await OnStateHasChanged.InvokeAsync();
     }

@@ -1,4 +1,5 @@
 using SyncAudio.Client.Components.Pages.NowPlaying.StateMachines;
+using SyncAudio.Core.Services;
 using SyncAudio.Core.Models;
 using SyncAudio.Core.Services.TrackSplit;
 
@@ -10,10 +11,9 @@ public sealed class NowPlayingState
         ["#FF5E7E", "#7A3CFF", "#FF9E5E"];
 
     /// <summary>
-    /// Playback lifecycle state machine. Drives the derived <see cref="IsJoined"/>,
-    /// <see cref="IsSplitting"/>, <see cref="IsBuffering"/>, <see cref="IsReady"/>,
-    /// and <see cref="IsPlaying"/> getters. Public so <see cref="NowPlayingLogic"/>
-    /// can fire triggers; do not mutate state directly.
+    /// Playback lifecycle state machine. Exposes <c>IsJoined</c>, <c>IsSplitting</c>,
+    /// <c>IsBuffering</c>, <c>IsReady</c>, <c>IsPlaying</c>, and <c>IsIdle</c> directly.
+    /// Public so <see cref="NowPlayingLogic"/> can fire triggers; do not mutate state directly.
     /// </summary>
     public LocalDeviceStateMachine Machine { get; }
 
@@ -59,6 +59,8 @@ public sealed class NowPlayingState
     public string? CoverSlot1 { get; private set; }
     public int ActiveCoverSlot { get; private set; }
 
+    internal CurrentCoverTracker? CoverTracker { private get; init; }
+
     internal void UpdateCoverUrl(string? newUrl)
     {
         var fullUrl = NowPlayingHelpers.AsFullCover(newUrl);
@@ -72,6 +74,7 @@ public sealed class NowPlayingState
             CoverSlot0 = fullUrl;
             ActiveCoverSlot = 0;
         }
+        CoverTracker?.CoverUrl = newUrl;
     }
 
     public IReadOnlyList<Track> Queue
@@ -87,14 +90,6 @@ public sealed class NowPlayingState
     } = [];
 
     internal readonly List<string> HistoryIds = new(8);
-
-    /// <summary>True iff the local audio source is actively playing. Derived from the state machine.</summary>
-    public bool IsPlaying => Machine.State == LocalDeviceState.Playing;
-
-    /// <summary>True iff the buffer is decoded and either ready to play or currently playing.
-    /// Stays true throughout <see cref="LocalDeviceState.Playing"/> so <see cref="IsBuffering"/> is
-    /// suppressed during playback. Derived from the state machine.</summary>
-    public bool IsReady => Machine.State is LocalDeviceState.Ready or LocalDeviceState.Playing;
 
     /// <summary>
     /// Hub fired WaitingForPeers because the adaptive lead would have exceeded its cap —
@@ -151,9 +146,6 @@ public sealed class NowPlayingState
         get;
         set => SetPropertyAndNotify(ref field, value);
     } = "demo";
-
-    /// <summary>True iff this circuit has joined a SignalR group. Derived from the state machine.</summary>
-    public bool IsJoined => Machine.State != LocalDeviceState.Disconnected;
 
     public int MemberCount
     {
@@ -255,9 +247,6 @@ public sealed class NowPlayingState
         get;
         set => SetPropertyAndNotify(ref field, value);
     }
-
-    /// <summary>True while ffmpeg is producing the split files for the current track. Derived from the state machine.</summary>
-    public bool IsSplitting => Machine.State == LocalDeviceState.Splitting;
 
     /// <summary>Number of audio channels in the current track's source, as reported by ffprobe. Null until the split returns.</summary>
     public int? SourceChannelCount
@@ -378,7 +367,7 @@ public sealed class NowPlayingState
 
     public Track? UpNext => Queue.Count > 0 ? Queue[0] : null;
 
-    public bool CanTransport => IsJoined && CurrentTrack is not null && (IsReady || IsSplitting || IsBuffering);
+    public bool CanTransport => Machine.IsJoined && CurrentTrack is not null;
     public bool CanPrevious => HistoryIds.Count > 0;
     public bool CanNext => Queue.Count > 0;
 
@@ -395,14 +384,14 @@ public sealed class NowPlayingState
     public string DurationDisplay =>
         DurationSeconds > 0 ? FormatTime(DurationSeconds) : (CurrentTrack?.DurationDisplay ?? "—:—");
 
-    /// <summary>True while the browser is downloading and decoding the audio file.
-    /// Distinct from IsSplitting (server ffmpeg) — this is the client-side load phase.
-    /// Derived from the state machine.</summary>
-    public bool IsBuffering => Machine.State == LocalDeviceState.Buffering;
-
-    /// <summary>True while any other joined device is still splitting or buffering.</summary>
+    /// <summary>
+    /// True when this device has committed to playing (state ≠ Idle) and at least one peer
+    /// is still splitting or buffering. Cold-start (Idle) stays false so PLAY is never
+    /// blocked before the user has initiated anything.
+    /// </summary>
     public bool AnyPeerLoading =>
-        IsJoined && Peers.Any(p => !p.IsSelf && p.Phase is "splitting" or "buffering");
+        Machine.IsJoined && !Machine.IsIdle &&
+        Peers.Any(p => !p.IsSelf && p.Phase is "splitting" or "buffering");
 
     public record PeerState(string Name, string Phase, double Progress, bool IsSelf,
         string TrackId = "", string Title = "", string Artist = "", string CoverUrl = "");
@@ -415,7 +404,7 @@ public sealed class NowPlayingState
 
     /// <summary>True while joined and at least one peer is still loading (pre-playing).</summary>
     public bool ShowPeersPanel =>
-        IsJoined &&
+        Machine.IsJoined &&
         Peers.Any(p => p.Phase is "splitting" or "buffering" or "ready");
 
     public bool IsSpatial => CurrentTrack?.Spatial == true || Channels >= 4;

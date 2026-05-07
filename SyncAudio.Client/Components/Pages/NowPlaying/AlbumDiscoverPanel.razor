@@ -21,7 +21,7 @@
                 @if (album.CoverUrl is { } url)
                 {
                     <img class="album-card__img"
-                         src="@NowPlayingHelpers.AsFullCover(url)"
+                         src="@NowPlayingHelpers.AsLargeCover(url)"
                          alt="@album.Title"
                          draggable="false"
                          crossorigin="anonymous" />

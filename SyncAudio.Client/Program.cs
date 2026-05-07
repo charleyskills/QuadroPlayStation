@@ -4,6 +4,9 @@ using Microsoft.AspNetCore.StaticFiles;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Options;
 using Minio;
+using SixLabors.ImageSharp;
+using SixLabors.ImageSharp.PixelFormats;
+using SixLabors.ImageSharp.Processing;
 using SyncAudio.Client.Components;
 using SyncAudio.Client.Components.Pages.NowPlaying;
 using SyncAudio.Core.Hubs;
@@ -50,6 +53,7 @@ else
 {
     builder.Services.AddSingleton<IObjectStore, LocalFileObjectStore>();
 }
+builder.Services.AddSingleton<CurrentCoverTracker>();
 builder.Services.AddSingleton<ICoverArtService, CoverArtService>();
 builder.Services.AddSingleton<ITrackLibraryService, TrackLibraryService>();
 builder.Services.AddSingleton<IPlaybackOrchestrator, PlaybackOrchestrator>();
@@ -148,6 +152,37 @@ app.UseAntiforgery();
 app.MapRazorComponents<App>().AddInteractiveServerRenderMode();
 app.MapHub<SyncHub>("/synchub");
 
+app.MapGet("/apple-touch-icon.png", async (
+    CurrentCoverTracker tracker,
+    IHttpClientFactory httpClientFactory,
+    HttpContext ctx,
+    CancellationToken ct) =>
+{
+    ctx.Response.Headers.CacheControl = "no-cache";
+    var coverUrl = tracker.CoverUrl;
+    if (coverUrl == null)
+    {
+        using var blank = new Image<Rgba32>(180, 180, new Rgba32(0, 0, 0, 255));
+        using var blankMs = new MemoryStream();
+        await blank.SaveAsPngAsync(blankMs, ct);
+        return Results.Bytes(blankMs.ToArray(), "image/png");
+    }
+
+    var baseUrl = $"{ctx.Request.Scheme}://{ctx.Request.Host}";
+    var client = httpClientFactory.CreateClient();
+    var coverBytes = await client.GetByteArrayAsync(baseUrl + coverUrl, ct);
+
+    using var image = Image.Load(coverBytes);
+    image.Mutate(x => x.Resize(new ResizeOptions
+    {
+        Size = new Size(180, 180),
+        Mode = ResizeMode.Crop,
+    }));
+    using var ms = new MemoryStream();
+    await image.SaveAsPngAsync(ms, ct);
+    return Results.Bytes(ms.ToArray(), "image/png");
+});
+
 app.MapGet("/cover/{trackId}", async (string trackId, string? size,
     ICoverArtService cover, HttpResponse response, CancellationToken ct) =>
 {
@@ -226,14 +261,16 @@ app.MapGet("/plex/cover/{serverId}/{ratingKey}", async (string serverId, string 
     IMemoryCache memCache, HttpResponse response, CancellationToken ct) =>
 {
     var isFull = size is "full";
+    var isLarge = size is "large";
     var thumbKey = $"plex/{serverId}/{ratingKey}_thumb.webp";
+    var largeKey = $"plex/{serverId}/{ratingKey}_large.webp";
     var fullKey = $"plex/{serverId}/{ratingKey}_orig";
     var coverBucket = storageOpts.Value.Buckets.Covers;
 
-    var requestedKey = isFull ? fullKey : thumbKey;
+    var requestedKey = isFull ? fullKey : isLarge ? largeKey : thumbKey;
     var cacheKey = $"plex-cover:{requestedKey}";
 
-    // 1. Object-store cache check. Thumbs are always WebP; full keeps original format.
+    // 1. Object-store cache check. Thumb and large are always WebP; full keeps original format.
     if (memCache.TryGetValue(cacheKey, out (byte[] Data, string Mime) hit) && hit.Data is not null)
     {
         response.Headers.CacheControl = "public, max-age=604800";
@@ -272,7 +309,7 @@ app.MapGet("/plex/cover/{serverId}/{ratingKey}", async (string serverId, string 
         ? ct1
         : CoverMime.Detect(sourceBytes);
 
-    // 3. Persist — full is byte-for-byte passthrough, thumb is a small WebP derivative.
+    // 3. Persist — full is byte-for-byte passthrough; thumb and large are WebP derivatives.
     // Best-effort; concurrent writes for the same key are harmless.
     try
     {
@@ -286,6 +323,11 @@ app.MapGet("/plex/cover/{serverId}/{ratingKey}", async (string serverId, string 
             using var thumbStream = CoverProcessor.MakeThumb(sourceBytes);
             await objectStore.PutAsync(coverBucket, thumbKey, thumbStream, "image/webp", ct);
         }
+        if (!await objectStore.ExistsAsync(coverBucket, largeKey, ct))
+        {
+            using var largeStream = CoverProcessor.MakeLarge(sourceBytes);
+            await objectStore.PutAsync(coverBucket, largeKey, largeStream, "image/webp", ct);
+        }
     }
     catch { /* non-fatal */ }
 
@@ -298,7 +340,19 @@ app.MapGet("/plex/cover/{serverId}/{ratingKey}", async (string serverId, string 
         return Results.File(sourceBytes, sourceMime);
     }
 
-    if (await objectStore.ExistsAsync(coverBucket, thumbKey, ct))
+    if (isLarge && await objectStore.ExistsAsync(coverBucket, largeKey, ct))
+    {
+        await using var s = await objectStore.OpenReadAsync(coverBucket, largeKey, ct);
+        using var sms = new MemoryStream();
+        await s.CopyToAsync(sms, ct);
+        var largeBytes = sms.ToArray();
+        memCache.Set(cacheKey, (largeBytes, "image/webp"),
+            new MemoryCacheEntryOptions { SlidingExpiration = TimeSpan.FromMinutes(30) });
+        response.Headers.CacheControl = "public, max-age=604800";
+        return Results.File(largeBytes, "image/webp");
+    }
+
+    if (!isLarge && await objectStore.ExistsAsync(coverBucket, thumbKey, ct))
     {
         await using var s = await objectStore.OpenReadAsync(coverBucket, thumbKey, ct);
         using var sms = new MemoryStream();
@@ -310,7 +364,7 @@ app.MapGet("/plex/cover/{serverId}/{ratingKey}", async (string serverId, string 
         return Results.File(thumbBytes, "image/webp");
     }
 
-    // Thumb derivation failed (e.g. ImageSharp couldn't decode); fall back to source.
+    // Derivation failed (e.g. ImageSharp couldn't decode); fall back to source.
     response.Headers.CacheControl = "public, max-age=604800";
     return Results.File(sourceBytes, sourceMime);
 });

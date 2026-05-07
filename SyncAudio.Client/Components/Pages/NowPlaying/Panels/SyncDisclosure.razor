@@ -22,6 +22,7 @@
                             @(IsSplitting ? "Splitting…" : IsBuffering ? "Buffering…" : "Ready")
                         </div>
                     </div>
+                    <button class="np-sync-join-btn" type="button" @onclick="@(() => OnLeave.InvokeAsync())">Change</button>
                 </div>
             }
             <div class="np-sync-readout">
@@ -113,11 +114,13 @@
     [Parameter] public int RightChannel { get; set; }
 
     [Parameter] public EventCallback<string> OnJoin { get; set; }
+    [Parameter] public EventCallback OnLeave { get; set; }
     [Parameter] public EventCallback<int> OnAdjustLatency { get; set; }
     [Parameter] public EventCallback<(int Left, int Right)> OnChannelMap { get; set; }
 
     private string _groupNameDraft = "demo";
     private bool _groupNameDraftSeeded;
+    private bool _prevIsJoined;
     private int _sliderDisplayMs;
     private int _lastSyncedLatencyOffsetMs;
     private CancellationTokenSource? _sliderDebounceCts;
@@ -130,6 +133,12 @@
             _groupNameDraft = GroupName;
             _groupNameDraftSeeded = true;
         }
+        else if (_prevIsJoined && !IsJoined && !string.IsNullOrWhiteSpace(GroupName))
+        {
+            // Re-seed when leaving a group so the input shows the group just left.
+            _groupNameDraft = GroupName;
+        }
+        _prevIsJoined = IsJoined;
 
         // Sync the slider display when the parent's latency offset changes externally
         // (e.g. JS pushed a new value via UpdateLatencyOffset). Don't clobber the user's

@@ -59,7 +59,9 @@ public sealed class TrackLibraryService(
                 var fileName = Path.GetFileNameWithoutExtension(key["local/".Length..]);
                 var trackId = fileName.ToLowerInvariant();
 
-                if (!await objectStore.ExistsAsync(buckets.Covers, $"local/{trackId}_thumb.webp", ct))
+                var thumbMissing = !await objectStore.ExistsAsync(buckets.Covers, $"local/{trackId}_thumb.webp", ct);
+                var largeMissing = !await objectStore.ExistsAsync(buckets.Covers, $"local/{trackId}_large.webp", ct);
+                if (thumbMissing || largeMissing)
                     await TryUploadCoverAsync(buckets, trackId, key, ct);
 
                 tracks.Add(new Track(
@@ -104,11 +106,23 @@ public sealed class TrackLibraryService(
             var data = pic.Data.Data;
             var sourceMime = !string.IsNullOrEmpty(pic.MimeType) ? pic.MimeType : CoverMime.Detect(data);
 
-            using (var thumb = CoverProcessor.MakeThumb(data))
+            if (!await objectStore.ExistsAsync(buckets.Covers, $"local/{trackId}_thumb.webp", ct))
+            {
+                using var thumb = CoverProcessor.MakeThumb(data);
                 await objectStore.PutAsync(buckets.Covers, $"local/{trackId}_thumb.webp", thumb, "image/webp", ct);
+            }
 
-            using (var full = new MemoryStream(data, writable: false))
+            if (!await objectStore.ExistsAsync(buckets.Covers, $"local/{trackId}_orig", ct))
+            {
+                using var full = new MemoryStream(data, writable: false);
                 await objectStore.PutAsync(buckets.Covers, $"local/{trackId}_orig", full, sourceMime, ct);
+            }
+
+            if (!await objectStore.ExistsAsync(buckets.Covers, $"local/{trackId}_large.webp", ct))
+            {
+                using var large = CoverProcessor.MakeLarge(data);
+                await objectStore.PutAsync(buckets.Covers, $"local/{trackId}_large.webp", large, "image/webp", ct);
+            }
         }
         catch (Exception ex)
         {

@@ -1,0 +1,108 @@
+/* ============================================================
+   NowPlayingUnified — single CSS-responsive page
+   Mobile-first. Switches to 2-column grid at 768px (tablet+).
+   Scoped under .npu-stage (added alongside .np-stage).
+   Reuses all np-* tokens and component styles from nowplaying.css.
+   ============================================================ */
+
+/* ─── Mobile default (≤767px) ─── */
+
+/*
+   .np-stage sets position:relative, min-height:100vh, background:#000.
+   .npu-stage overrides to flex-column with 100dvh so the stage collapses
+   correctly when the mobile browser chrome (address bar) shows/hides.
+   Natural page scroll is preserved — no overflow:hidden.
+*/
+.npu-stage {
+    display: flex;
+    flex-direction: column;
+    min-height: 100dvh;
+}
+
+.npu-header {
+    position: relative;
+    z-index: 5;
+}
+
+.npu-body {
+    display: block;
+    position: relative;
+    z-index: 1;
+}
+
+/* .npu-left inherits np-cover styles — full width, natural document flow */
+.npu-left { }
+
+.npu-right {
+    padding: 0 16px;
+    padding-bottom: max(env(safe-area-inset-bottom, 0px), 48px);
+}
+
+/* VolumeControl hidden on mobile */
+.npu-volume {
+    display: none;
+}
+
+/* ─── Tablet / Desktop (≥768px) ─── */
+@media (min-width: 768px) {
+
+    /*
+       Full-viewport stage with no overflow, identical to .npd-stage.
+       min-height:unset cancels the .np-stage { min-height:100vh } rule from
+       nowplaying.css so height:100vh + overflow:hidden take full effect.
+    */
+    .npu-stage {
+        height: 100vh;
+        min-height: unset;
+        overflow: hidden;
+    }
+
+    /* Header: above the 2-column grid, elevated z-index */
+    .npu-header {
+        position: relative;
+        z-index: 10;
+        flex: 0 0 auto;
+    }
+
+    /* Body: 2-column grid, takes all remaining height */
+    .npu-body {
+        flex: 1 1 0;
+        display: grid;
+        grid-template-columns: 45fr 55fr;
+        overflow: hidden;
+        min-height: 0;
+    }
+
+    /* Left column: centered cover art */
+    .npu-left {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 32px 24px 32px 48px;
+        min-height: 0;
+    }
+
+    /* Cover fills the left column up to a max size, no internal padding */
+    .npu-left .np-cover {
+        padding: 0;
+        width: 100%;
+        max-width: 560px;
+    }
+
+    /* Right column: scrollable controls panel */
+    .npu-right {
+        overflow-y: auto;
+        padding: 8px 48px 48px 24px;
+        min-height: 0;
+    }
+
+    /* Give the track header a bit more breathing room on desktop */
+    .npu-right .np-track-header {
+        padding-top: 8px;
+    }
+
+    /* VolumeControl visible on tablet and above */
+    .npu-volume {
+        display: flex;
+    }
+}

@@ -28,7 +28,7 @@ public abstract class NowPlayingBase : ComponentBase, IAsyncDisposable
     private bool _plexObserverInstalled;
     private bool _discoverObserverInstalled;
     private bool _pendingAutoJoin;
-    private string? _pendingRestoreTrackId;
+    private bool _pendingRoomIdRestore;
     private bool _prevIsSplitting;
     private bool _prevIsJoined;
     protected bool _syncOpen;
@@ -76,7 +76,10 @@ public abstract class NowPlayingBase : ComponentBase, IAsyncDisposable
 
         if (string.IsNullOrWhiteSpace(RoomId))
         {
-            Navigation.NavigateTo(RoomIdRedirectRoute(NowPlayingHelpers.GenerateRoomId()), replace: true);
+            // Defer room-ID resolution to OnAfterRenderAsync so we can query localStorage
+            // first. This is necessary for iOS PWA Home Screen launches, which always open
+            // at start_url "/" regardless of the URL used when "Add to Home Screen" was tapped.
+            _pendingRoomIdRestore = true;
             return Task.CompletedTask;
         }
 
@@ -138,6 +141,18 @@ public abstract class NowPlayingBase : ComponentBase, IAsyncDisposable
 
         if (!firstRender) return;
 
+        if (_pendingRoomIdRestore)
+        {
+            _pendingRoomIdRestore = false;
+            string? savedRoomId = null;
+            try { savedRoomId = await JS.InvokeAsync<string?>("syncAudio.loadRoomId"); } catch { }
+            var roomId = !string.IsNullOrWhiteSpace(savedRoomId)
+                ? savedRoomId
+                : NowPlayingHelpers.GenerateRoomId();
+            Navigation.NavigateTo(RoomIdRedirectRoute(roomId), replace: true);
+            return;
+        }
+
         if (!string.IsNullOrWhiteSpace(RoomId))
         {
             try
@@ -167,6 +182,7 @@ public abstract class NowPlayingBase : ComponentBase, IAsyncDisposable
             await JS.InvokeVoidAsync("syncAudio.setVolume", _context.State.Volume);
             _jsInitialized = true;
             Logger.LogInformation("NowPlayingBase: JS engine initialized");
+            try { await JS.InvokeVoidAsync("syncAudio.saveRoomId", RoomId!); } catch { }
 
             // Restore stream pair before track restore so CurrentStreamUrl picks the right pair.
             var savedPair = await JS.InvokeAsync<string?>("syncAudio.loadStreamPair");
@@ -195,8 +211,12 @@ public abstract class NowPlayingBase : ComponentBase, IAsyncDisposable
                                  && _context.State.IsPlexConnected
                                  && ratingKey is not null)
                         {
-                            _pendingRestoreTrackId = trackId;
                             await HandlePlexAlbumPlayRequested(ratingKey);
+                            // Reposition to the saved track without triggering a split.
+                            var restoreTarget = _context.State.Queue.FirstOrDefault(t => t.Id == trackId);
+                            if (restoreTarget is not null)
+                                await _context.Logic.PositionToPlexTrackAsync(restoreTarget);
+                            // else: saved track is already track[0] (CurrentTrack).
                         }
                     }
                     Logger.LogInformation("NowPlayingBase: track restore complete");
@@ -239,18 +259,22 @@ public abstract class NowPlayingBase : ComponentBase, IAsyncDisposable
         }
     }
 
-    protected async Task OnStateChangedAsync()
+    private async Task OnStateChangedAsync()
     {
         var s = _context.State;
-        if (!_prevIsJoined && s.IsJoined)
+        if (!_prevIsJoined && s.Machine.IsJoined)
+        {
             _syncOpen = false;
-        _prevIsJoined = s.IsJoined;
+        }
+        _prevIsJoined = s.Machine.IsJoined;
 
         if (s.ActiveConnectionToast is { IsError: false })
         {
-            _toastDismissCts?.Cancel();
+            await (_toastDismissCts?.CancelAsync() ?? Task.CompletedTask);
+            
             _toastDismissCts = new CancellationTokenSource();
             var cts = _toastDismissCts;
+            
             _ = Task.Delay(1000, cts.Token).ContinueWith(async t =>
             {
                 if (t.IsCanceled) return;
@@ -259,14 +283,16 @@ public abstract class NowPlayingBase : ComponentBase, IAsyncDisposable
             }, TaskScheduler.Default);
         }
 
-        if (_jsInitialized && s.IsSplitting != _prevIsSplitting)
+        if (_jsInitialized && s.Machine.IsSplitting != _prevIsSplitting)
         {
-            _prevIsSplitting = s.IsSplitting;
-            if (s.IsSplitting)
+            _prevIsSplitting = s.Machine.IsSplitting;
+            if (s.Machine.IsSplitting)
             {
                 // Report new track to hub before splitting phase so PeersOverlay shows correct title.
                 if (s.CurrentTrack is { } t)
+                {
                     await JS.InvokeVoidAsync("syncAudio.reportNowPlaying", t.Id, t.Title, t.Artist, t.CoverUrl ?? "");
+                }
                 await JS.InvokeVoidAsync("syncAudio.setSplitting", true);
             }
             // When splitting ends, setSrc fires next and reports 'buffering' itself.
@@ -303,7 +329,7 @@ public abstract class NowPlayingBase : ComponentBase, IAsyncDisposable
     {
         if (!_jsInitialized) return;
         var albumKey = _context.State.PlexCurrentAlbumRatingKey;
-        if (_context.State.IsJoined && !string.IsNullOrEmpty(albumKey))
+        if (_context.State.Machine.IsJoined && !string.IsNullOrEmpty(albumKey))
             await JS.InvokeVoidAsync("syncAudio.selectAlbum", albumKey);
         await JS.InvokeVoidAsync("syncAudio.requestPlay", _context.State.CurrentTrack?.Id ?? string.Empty);
     }
@@ -317,21 +343,6 @@ public abstract class NowPlayingBase : ComponentBase, IAsyncDisposable
     private async Task HandleCurrentTrackChanged(Track track)
     {
         if (!_jsInitialized) return;
-
-        // Plex restore: album loaded as track[0] but the user was on a different track.
-        // Redirect to the originally-selected track; this method fires again once it lands.
-        if (_pendingRestoreTrackId is { } wantedId && track.Id != wantedId)
-        {
-            _pendingRestoreTrackId = null;
-            var target = _context.State.Queue.FirstOrDefault(t => t.Id == wantedId);
-            if (target is not null)
-            {
-                await _context.Logic.SelectFromQueueAsync(target);
-                return;
-            }
-            // Target not in queue — fall through and use whichever track is current.
-        }
-        _pendingRestoreTrackId = null;
 
         await JS.InvokeVoidAsync("syncAudio.saveCurrentTrack",
             track.Id,
@@ -349,6 +360,9 @@ public abstract class NowPlayingBase : ComponentBase, IAsyncDisposable
         await JS.InvokeVoidAsync("syncAudio.setSrc", url);
         await JS.InvokeVoidAsync("syncAudio.reportNowPlaying",
             track.Id, track.Title, track.Artist, track.CoverUrl ?? "");
+        await JS.InvokeVoidAsync("syncAudio.setNowPlayingMetadata",
+            track.Title, track.Artist, track.Album, track.CoverUrl ?? "");
+        await JS.InvokeVoidAsync("updateTouchIcon", track.Id);
 
         var pendingPlayAt = _context.Logic.ConsumePendingPlayAtMs();
         if (pendingPlayAt.HasValue)
@@ -394,6 +408,8 @@ public abstract class NowPlayingBase : ComponentBase, IAsyncDisposable
     {
         _context.State.GroupName = groupName;
         await _context.Logic.RequestJoinAsync();
+        if (_jsInitialized)
+            try { await JS.InvokeVoidAsync("syncAudio.saveRoomId", groupName); } catch { }
     }
 
     protected Task HandleAlbumRowClick(Track t)
@@ -403,7 +419,13 @@ public abstract class NowPlayingBase : ComponentBase, IAsyncDisposable
         {
             return _context.Logic.TogglePlayAsync();
         }
-        return _context.Logic.SelectFromQueueAsync(t);
+        return _context.Logic.SelectFromQueueAsync(t, play: true);
+    }
+
+    protected async Task HandlePlexSheetTrackClick(Track t)
+    {
+        await _context.Logic.TogglePlexPanelAsync();
+        await HandleAlbumRowClick(t);
     }
 
     // ─── Discover handlers ──────────────────────────────────────────
@@ -487,7 +509,13 @@ public abstract class NowPlayingBase : ComponentBase, IAsyncDisposable
     {
         if (string.IsNullOrEmpty(trackId)) return false;
         var isSame = string.Equals(_context.State.CurrentTrack?.Id, trackId, StringComparison.Ordinal);
-        if (!isSame) await _context.Logic.MirrorRemoteTrackSelectionAsync(trackId);
+        if (!isSame)
+            await _context.Logic.MirrorRemoteTrackSelectionAsync(trackId);
+        else
+            // Same track but pipeline may not have run yet (e.g. initial split skipped
+            // because the machine was Disconnected). Ensure buffering starts so this
+            // device can report readiness to the hub.
+            await _context.Logic.EnsureReadyForPlayAsync();
         return isSame;
     }
 
@@ -503,9 +531,13 @@ public abstract class NowPlayingBase : ComponentBase, IAsyncDisposable
             && !string.Equals(_context.State.PlexCurrentAlbumRatingKey, albumKey, StringComparison.Ordinal))
             await _context.Logic.MirrorRemoteAlbumSelectionAsync(albumKey);
 
-        if (!string.IsNullOrEmpty(trackId)
-            && !string.Equals(_context.State.CurrentTrack?.Id, trackId, StringComparison.Ordinal))
-            await _context.Logic.MirrorRemoteTrackSelectionAsync(trackId);
+        if (!string.IsNullOrEmpty(trackId))
+        {
+            if (!string.Equals(_context.State.CurrentTrack?.Id, trackId, StringComparison.Ordinal))
+                await _context.Logic.MirrorRemoteTrackSelectionAsync(trackId);
+            else
+                await _context.Logic.EnsureReadyForPlayAsync();
+        }
     }
 
     /// <summary>
@@ -685,6 +717,9 @@ public abstract class NowPlayingBase : ComponentBase, IAsyncDisposable
             var phase    = p.TryGetProperty("phase",    out var ph) ? ph.GetString() ?? "idle"   : "idle";
             var progress = p.TryGetProperty("progress", out var pr) ? pr.GetDouble() : 0.0;
             var isSelf   = p.TryGetProperty("isSelf",   out var sf) && sf.GetBoolean();
+            // Server phase lags by a round-trip after _reportPhase('playing') is sent.
+            // Use local machine as authoritative source for our own entry.
+            if (isSelf && _context.State.Machine.IsPlaying) phase = "playing";
             var trackId  = p.TryGetProperty("trackId",  out var ti) ? ti.GetString() ?? "" : "";
             var title    = p.TryGetProperty("title",    out var tl) ? tl.GetString() ?? "" : "";
             var artist   = p.TryGetProperty("artist",   out var ar) ? ar.GetString() ?? "" : "";

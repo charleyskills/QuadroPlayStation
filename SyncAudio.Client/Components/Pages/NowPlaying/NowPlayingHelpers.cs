@@ -6,8 +6,19 @@ internal static class NowPlayingHelpers
     {
         if (string.IsNullOrEmpty(url) || url.Contains("size=full", StringComparison.Ordinal))
             return url;
-        
+
         return url.Contains('?') ? $"{url}&size=full" : $"{url}?size=full";
+    }
+
+    public static string? AsLargeCover(string? url)
+    {
+        if (string.IsNullOrEmpty(url) || url.Contains("size=large", StringComparison.Ordinal))
+            return url;
+        if (url.Contains("size=full", StringComparison.Ordinal))
+            return url.Replace("size=full", "size=large", StringComparison.Ordinal);
+        if (url.Contains("size=thumb", StringComparison.Ordinal))
+            return url.Replace("size=thumb", "size=large", StringComparison.Ordinal);
+        return url.Contains('?') ? $"{url}&size=large" : $"{url}?size=large";
     }
 
     public static string GenerateRoomId()

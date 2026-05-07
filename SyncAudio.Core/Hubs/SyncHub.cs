@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.SignalR;
+using SyncAudio.Core.Services;
 using SyncAudio.Core.Services.Sync.StateMachines;
 
 namespace SyncAudio.Core.Hubs;
@@ -8,7 +9,7 @@ namespace SyncAudio.Core.Hubs;
 /// <see cref="IPlaybackOrchestrator"/>; the hub's job is to translate SignalR calls into
 /// orchestrator method calls and broadcast the returned <see cref="HubEffect"/>s.
 /// </summary>
-public class SyncHub(IPlaybackOrchestrator orchestrator) : Hub
+public class SyncHub(IPlaybackOrchestrator orchestrator, CurrentCoverTracker coverTracker) : Hub
 {
 
     public Task JoinGroup(string group, string? deviceName = null)
@@ -50,6 +51,8 @@ public class SyncHub(IPlaybackOrchestrator orchestrator) : Hub
 
     public Task ReportNowPlaying(string group, string trackId, string title, string artist, string? coverUrl)
     {
+        if (!string.IsNullOrEmpty(coverUrl))
+            coverTracker.CoverUrl = coverUrl;
         var effects = orchestrator.OnReportNowPlaying(
             Context.ConnectionId, group, trackId, title, artist, coverUrl);
         return ApplyEffectsAsync(effects);

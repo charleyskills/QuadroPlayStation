@@ -26,6 +26,15 @@ public sealed class LocalDeviceStateMachine
 
     public LocalDeviceState State => _sm.State;
 
+    public bool IsIdle     => _sm.State == LocalDeviceState.Idle;
+    public bool IsSplitting => _sm.State == LocalDeviceState.Splitting;
+    public bool IsBuffering => _sm.State == LocalDeviceState.Buffering;
+    /// <summary>True when the buffer is decoded and ready, or currently playing.</summary>
+    public bool IsReady    => _sm.State is LocalDeviceState.Ready or LocalDeviceState.Playing;
+    public bool IsPlaying  => _sm.State == LocalDeviceState.Playing;
+    /// <summary>True once joined to a group (any state other than Disconnected).</summary>
+    public bool IsJoined   => _sm.State != LocalDeviceState.Disconnected;
+
     /// <summary>Fired after every transition. (source, destination, trigger).</summary>
     public event Action<LocalDeviceState, LocalDeviceState, LocalDeviceTrigger>? Transitioned;
 

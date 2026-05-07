@@ -78,9 +78,10 @@
                     <div class="sheet-list">
                         @foreach (var album in Albums)
                         {
+                            var isExpanded = album.RatingKey == expandedKey;
+                            var isCollapsing = !isExpanded && album.RatingKey == _collapsedFromKey;
                             <button class="queue-row" type="button"
-                                    disabled="@IsPlexLoadingAlbum"
-                                    @onclick="@(() => OnAlbumPlay.InvokeAsync(album.RatingKey))">
+                                    @onclick="@(() => HandleAlbumClick(album.RatingKey))">
                                 @if (album.CoverUrl is { } u)
                                 {
                                     <img class="mini-cover" src="@u" alt="" draggable="false" />
@@ -96,6 +97,54 @@
                                 <span class="plex-badge">DTS</span>
                                 <span class="row-dur">@(album.TrackCount > 0 ? $"{album.TrackCount} tr" : "")</span>
                             </button>
+                            <div class="plex-inline-wrap @(isExpanded ? "plex-inline-wrap--open" : "")">
+                                <div class="plex-inline-inner">
+                                    @if (isExpanded)
+                                    {
+                                        @if (IsPlexLoadingAlbum)
+                                        {
+                                            <div class="plex-inline-loading">Loading tracks…</div>
+                                        }
+                                        else
+                                        {
+                                            <div class="plex-inline-tracks">
+                                                @for (var i = 0; i < AlbumTracks.Count; i++)
+                                                {
+                                                    var t = AlbumTracks[i];
+                                                    var num = i + 1;
+                                                    var isCurrent = t.Id == CurrentTrackId;
+                                                    <button class="plex-track-row @(isCurrent ? "plex-track-row--current" : "")"
+                                                            type="button"
+                                                            @onclick="@(() => OnTrackSelect.InvokeAsync(t))">
+                                                        <span class="plex-track-row__num">@num</span>
+                                                        <span class="plex-track-row__text">
+                                                            <span class="plex-track-row__title">@t.Title</span>
+                                                            <span class="plex-track-row__dur">@t.DurationDisplay</span>
+                                                        </span>
+                                                    </button>
+                                                }
+                                            </div>
+                                        }
+                                    }
+                                    else if (isCollapsing && _collapsedFromTracks.Count > 0)
+                                    {
+                                        <div class="plex-inline-tracks">
+                                            @for (var i = 0; i < _collapsedFromTracks.Count; i++)
+                                            {
+                                                var t = _collapsedFromTracks[i];
+                                                var num = i + 1;
+                                                <button class="plex-track-row" type="button" disabled>
+                                                    <span class="plex-track-row__num">@num</span>
+                                                    <span class="plex-track-row__text">
+                                                        <span class="plex-track-row__title">@t.Title</span>
+                                                        <span class="plex-track-row__dur">@t.DurationDisplay</span>
+                                                    </span>
+                                                </button>
+                                            }
+                                        </div>
+                                    }
+                                </div>
+                            </div>
                         }
                     </div>
                     <div class="plex-page-status">
@@ -145,15 +194,45 @@
     [Parameter] public string PlexSearchQuery { get; set; } = "";
     [Parameter] public EventCallback<string> OnSearch { get; set; }
 
+    [Parameter] public IReadOnlyList<Track> AlbumTracks { get; set; } = [];
+    [Parameter] public string? CurrentTrackId { get; set; }
+    [Parameter] public string? SelectedAlbumRatingKey { get; set; }
+
     [Parameter] public EventCallback OnTogglePanel { get; set; }
     [Parameter] public EventCallback OnToggleDiscoverView { get; set; }
     [Parameter] public EventCallback OnRefreshAlbums { get; set; }
     [Parameter] public EventCallback OnPlexConnected { get; set; }
     [Parameter] public EventCallback OnPlexDisconnected { get; set; }
     [Parameter] public EventCallback<string> OnAlbumPlay { get; set; }
+    [Parameter] public EventCallback<Track> OnTrackSelect { get; set; }
 
     private bool _searchOpen;
     private string _searchDraft = "";
+    private string? _pendingRatingKey;
+    private string? _collapsedFromKey;
+    private IReadOnlyList<Track> _collapsedFromTracks = [];
+
+    private string? expandedKey => IsPlexLoadingAlbum ? _pendingRatingKey : SelectedAlbumRatingKey;
+
+    private async Task HandleAlbumClick(string ratingKey)
+    {
+        var current = expandedKey;
+        if (current != null && current != ratingKey
+            && current == SelectedAlbumRatingKey && AlbumTracks.Count > 0)
+        {
+            _collapsedFromKey = current;
+            _collapsedFromTracks = AlbumTracks;
+        }
+        else
+        {
+            _collapsedFromKey = null;
+            _collapsedFromTracks = [];
+        }
+        _pendingRatingKey = ratingKey;
+        await OnAlbumPlay.InvokeAsync(ratingKey);
+        await Task.Delay(300);
+        await InvokeAsync(() => { _collapsedFromKey = null; _collapsedFromTracks = []; StateHasChanged(); });
+    }
 
     private void OpenSearch() { _searchDraft = PlexSearchQuery; _searchOpen = true; }
     private void CloseSearch() => _searchOpen = false;

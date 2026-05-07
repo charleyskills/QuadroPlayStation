@@ -45,6 +45,13 @@ public sealed class CoverArtService(
                 objectStore.PutAsync(CoverBucket, fullKey, fullStream, sourceMime).GetAwaiter().GetResult();
             }
 
+            var largeKey = LargeKey(trackId);
+            if (!objectStore.ExistsAsync(CoverBucket, largeKey).GetAwaiter().GetResult())
+            {
+                using var largeStream = CoverProcessor.MakeLarge(data);
+                objectStore.PutAsync(CoverBucket, largeKey, largeStream, "image/webp").GetAwaiter().GetResult();
+            }
+
             return true;
         }
         catch (Exception ex)
@@ -57,22 +64,32 @@ public sealed class CoverArtService(
     public async Task<(byte[] Data, string Mime)?> GetCoverAsync(string trackId, string size, CancellationToken ct = default)
     {
         var isFull = size is "full";
-        var key = isFull ? FullKey(trackId) : ThumbKey(trackId);
+        var isLarge = size is "large";
+        var key = isFull ? FullKey(trackId) : isLarge ? LargeKey(trackId) : ThumbKey(trackId);
         var cacheKey = $"cover:{key}";
 
         if (memCache.TryGetValue(cacheKey, out CacheEntry cached) && cached.Data is not null)
             return (cached.Data, cached.Mime);
 
+        // Large falls back to full when the large variant hasn't been generated yet.
         if (!await objectStore.ExistsAsync(CoverBucket, key, ct))
-            return null;
+        {
+            if (!isLarge) return null;
+            key = FullKey(trackId);
+            cacheKey = $"cover:{key}";
+            if (memCache.TryGetValue(cacheKey, out cached) && cached.Data is not null)
+                return (cached.Data, cached.Mime);
+            if (!await objectStore.ExistsAsync(CoverBucket, key, ct))
+                return null;
+        }
 
         await using var stream = await objectStore.OpenReadAsync(CoverBucket, key, ct);
         using var ms = new MemoryStream();
         await stream.CopyToAsync(ms, ct);
         var bytes = ms.ToArray();
 
-        // Thumbs are always WebP; full keeps original format and is sniffed from bytes.
-        var mime = isFull ? CoverMime.Detect(bytes) : "image/webp";
+        // Thumb and large are always WebP; full keeps original format and is sniffed from bytes.
+        var mime = (isFull || (isLarge && key == FullKey(trackId))) ? CoverMime.Detect(bytes) : "image/webp";
 
         memCache.Set(cacheKey, new CacheEntry(bytes, mime), new MemoryCacheEntryOptions
         {
@@ -83,6 +100,7 @@ public sealed class CoverArtService(
     }
 
     private static string ThumbKey(string trackId) => $"local/{trackId}_thumb.webp";
+    private static string LargeKey(string trackId) => $"local/{trackId}_large.webp";
     private static string FullKey(string trackId) => $"local/{trackId}_orig";
 
     private readonly record struct CacheEntry(byte[]? Data, string Mime);

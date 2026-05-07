@@ -1325,6 +1325,74 @@ img.mini-cover { background: #1a0a2e; }
 .plex-search-input::placeholder { color: rgba(255, 255, 255, 0.35); }
 .plex-search-input:focus { background: rgba(255, 255, 255, 0.14); }
 
+/* ─── Plex inline track expansion (below selected album row) ─── */
+.plex-inline-wrap {
+    display: grid;
+    grid-template-rows: 0fr;
+    transition: grid-template-rows 260ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+.plex-inline-wrap--open {
+    grid-template-rows: 1fr;
+}
+.plex-inline-inner {
+    overflow: hidden;
+    min-height: 0;
+}
+.plex-inline-loading {
+    padding: 10px 20px 6px 56px;
+    font-size: 12px;
+    color: var(--np-muted-3);
+}
+.plex-inline-tracks {
+    padding: 2px 12px 8px 12px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    margin-bottom: 4px;
+}
+.plex-track-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 8px 8px;
+    border-radius: 8px;
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    color: #fff;
+    text-align: left;
+    font: inherit;
+}
+.plex-track-row:hover { background: rgba(255, 255, 255, 0.05); }
+.plex-track-row--current .plex-track-row__title { color: #1DB954; font-weight: 600; }
+.plex-track-row__num {
+    font-size: 12px;
+    color: var(--np-muted-3);
+    width: 20px;
+    text-align: center;
+    flex-shrink: 0;
+    font-variant-numeric: tabular-nums;
+}
+.plex-track-row--current .plex-track-row__num { color: #1DB954; }
+.plex-track-row__text {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+}
+.plex-track-row__title {
+    font-size: 13px;
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.plex-track-row__dur {
+    font-size: 11px;
+    color: var(--np-muted-3);
+    font-variant-numeric: tabular-nums;
+}
+
 /* ─── Mobile (≤640px): drop the iOS frame, full-bleed scroll ─── */
 @media (max-width: 640px) {
     .np-frame { width: 100%; }

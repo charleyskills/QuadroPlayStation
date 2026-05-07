@@ -14,7 +14,8 @@
 //
 // External API (consumed by NowPlaying.razor — do not break):
 //   initialize, setSrc, setVolume, connectAndJoin,
-//   setChannelMap, setLatencyOffset, adjustLatency, requestPlay, requestStop
+//   setChannelMap, setLatencyOffset, adjustLatency, requestPlay, requestStop,
+//   setNowPlayingMetadata
 const engine = {
   // ─── Public state ──────────────────────────────────────────────────
   ctx: null,
@@ -45,6 +46,7 @@ const engine = {
   _isPlaying: false,
   _positionTimer: null,
   _wakeLock: null,
+  _silentEl: null,
 
   // Per-device manual latency offset (ms). Persisted in localStorage.
   // Auto-compensation handles outputLatency; this closes any residual gap.
@@ -81,6 +83,20 @@ const engine = {
     this._gain.gain.value = 1.0;
     this._gain.connect(this.ctx.destination);
 
+    // iOS keepalive: a looping silent audio element holds the audio session open so
+    // the AudioContext is not suspended when the screen locks or the app is minimised.
+    this._silentEl = document.createElement('audio');
+    this._silentEl.loop = true;
+    this._silentEl.src = this._createSilenceUrl();
+    this._silentEl.volume = 0.001; // volume=0 is treated as muted on some iOS versions
+
+    // Auto-resume if iOS suspends the context mid-playback (belt-and-suspenders).
+    this.ctx.addEventListener('statechange', () => {
+      if (this.ctx.state === 'suspended' && this._isPlaying) {
+        this.ctx.resume().catch(() => {});
+      }
+    });
+
     try {
       const saved = localStorage.getItem('syncAudio.channelMap.' + audioUrl);
       if (saved) this.channelMap = JSON.parse(saved);
@@ -104,6 +120,10 @@ const engine = {
         // without a fresh gesture because the context was already unlocked.
         if (this._audioUnlocked && this.ctx.state !== 'running') {
           this.ctx.resume().catch(() => {});
+        }
+        // Restart silent keepalive if it was paused by the OS.
+        if (this._audioUnlocked && this._silentEl && this._silentEl.paused) {
+          this._silentEl.play().catch(() => {});
         }
         if (this._isPlaying) this._acquireWakeLock();
       }
@@ -138,6 +158,9 @@ const engine = {
       src.connect(this.ctx.destination);
       src.start(0);
       this._audioUnlocked = (this.ctx.state === 'running');
+      if (this._audioUnlocked && this._silentEl) {
+        this._silentEl.play().catch(() => {});
+      }
     } catch { /* denied — user will be prompted via ShowUnlockPrompt */ }
   },
 
@@ -567,6 +590,14 @@ const engine = {
     try { return localStorage.getItem('syncAudio.streamPair'); } catch { return null; }
   },
 
+  saveRoomId(roomId) {
+    try { localStorage.setItem('syncAudio.roomId', roomId); } catch { /* private mode */ }
+  },
+
+  loadRoomId() {
+    try { return localStorage.getItem('syncAudio.roomId'); } catch { return null; }
+  },
+
   // Adjust the offset AND, if currently playing, immediately reflect it
   // by replacing the source with a fresh one at the shifted position.
   // A 10–50 ms seek is below most click-noticeable thresholds.
@@ -661,6 +692,7 @@ const engine = {
       if (this._source === src) {
         this._isPlaying = false;
         this._source = null;
+        if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'paused';
         this._invoke('UpdatePlayState', false);
         this._invoke('UpdateTrackEnded');
         this._stopPositionTimer();
@@ -672,6 +704,7 @@ const engine = {
     this._ctxStartTime = ctxTargetTime;
     this._bufferOffset = bufferOffsetSec;
     this._isPlaying = true;
+    if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing';
     this._invoke('UpdatePlayState', true);
     this._reportPhase('playing', 1.0);
     this._startPositionTimer();
@@ -687,6 +720,7 @@ const engine = {
     }
     if (this._isPlaying) {
       this._isPlaying = false;
+      if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'paused';
       this._invoke('UpdatePlayState', false);
       this._reportPhase(this._buffer ? 'ready' : 'idle', this._hubProgress);
     }
@@ -766,5 +800,51 @@ const engine = {
   getViewportWidth() {
     return window.innerWidth;
   },
+
+  // Generates a 1-second silent WAV as a Blob URL. Used to create the iOS keepalive
+  // audio element — no static file needed.
+  _createSilenceUrl() {
+    const sr = 8000, n = sr;
+    const buf = new ArrayBuffer(44 + n * 2);
+    const v = new DataView(buf);
+    const s = (o, t) => { for (let i = 0; i < t.length; i++) v.setUint8(o + i, t.charCodeAt(i)); };
+    s(0,'RIFF'); v.setUint32(4, 36 + n * 2, true);
+    s(8,'WAVE'); s(12,'fmt ');
+    v.setUint32(16,16,true); v.setUint16(20,1,true); v.setUint16(22,1,true);
+    v.setUint32(24,sr,true); v.setUint32(28,sr * 2,true);
+    v.setUint16(32,2,true); v.setUint16(34,16,true);
+    s(36,'data'); v.setUint32(40,n * 2,true);
+    return URL.createObjectURL(new Blob([buf], { type: 'audio/wav' }));
+  },
+
+  // Updates the OS lock-screen / Control Centre widget via the Media Session API.
+  // Called from C# when a new track starts — this is what tells iOS this page is
+  // an active audio app and should not be killed in the background.
+  setNowPlayingMetadata(title, artist, album, coverUrl) {
+    if (!('mediaSession' in navigator)) return;
+    // Use large variant (max 1500px lossless WebP) for the OS lock-screen widget.
+    // Local URLs already carry size=full; Plex URLs have no size= param yet.
+    const largeUrl = coverUrl
+      ? (coverUrl.includes('size=') ? coverUrl.replace(/size=[^&]+/, 'size=large') : coverUrl + (coverUrl.includes('?') ? '&' : '?') + 'size=large')
+      : null;
+    const artwork = largeUrl ? [{ src: largeUrl, sizes: '1500x1500', type: 'image/webp' }] : [];
+    navigator.mediaSession.metadata = new MediaMetadata({
+      title:  title  || '',
+      artist: artist || '',
+      album:  album  || '',
+      artwork,
+    });
+    // Register no-op handlers so iOS shows the metadata widget without
+    // exposing Play/Pause buttons that could desync the group.
+    navigator.mediaSession.setActionHandler('play',  null);
+    navigator.mediaSession.setActionHandler('pause', null);
+    navigator.mediaSession.setActionHandler('stop',  null);
+  },
 };
 window.syncAudio = engine;
+
+window.updateTouchIcon = function (token) {
+    const link = document.querySelector('link[rel="apple-touch-icon"]');
+    if (!link) return;
+    link.href = '/apple-touch-icon.png?v=' + token;
+};

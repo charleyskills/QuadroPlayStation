@@ -20,7 +20,8 @@ public sealed class TrackSplitService(
     IObjectStore store,
     IOptions<StorageOptions> storageOpts,
     IOptions<TrackSplitOptions> options,
-    ILogger<TrackSplitService> logger)
+    ILogger<TrackSplitService> logger,
+    IWebHostEnvironment env)
     : ITrackSplitService
 {
     private readonly TrackSplitOptions _opts = options.Value;
@@ -44,9 +45,12 @@ public sealed class TrackSplitService(
         var (frontKey, backKey) = ComputeKeys(track, mapping, effectiveFormat);
 
         if (await SplitExistsAsync(frontKey, backKey, ct))
+        {
+            TryDeleteLegacyLocalSplit(track);
             return new TrackSplitResult(
                 ToClientUrl(frontKey), ToClientUrl(backKey),
                 channelCount, channelLayout, mapping);
+        }
 
         var lockKey = track.Id + "|" + mapping.ToFileSuffix() + "|" + effectiveFormat;
         var sem = _locks.GetOrAdd(lockKey, _ => new SemaphoreSlim(1, 1));
@@ -54,9 +58,12 @@ public sealed class TrackSplitService(
         try
         {
             if (await SplitExistsAsync(frontKey, backKey, ct))
+            {
+                TryDeleteLegacyLocalSplit(track);
                 return new TrackSplitResult(
                     ToClientUrl(frontKey), ToClientUrl(backKey),
                     channelCount, channelLayout, mapping);
+            }
 
             logger.LogInformation(
                 "Splitting {TrackId} ({Source}, {Channels}ch {Layout}, {Format}) → front=c{FL}|c{FR}, back=c{BL}|c{BR}",
@@ -89,6 +96,7 @@ public sealed class TrackSplitService(
                 try { Directory.Delete(tempDir, true); } catch { /* best-effort */ }
             }
 
+            TryDeleteLegacyLocalSplit(track);
             return new TrackSplitResult(
                 ToClientUrl(frontKey), ToClientUrl(backKey),
                 channelCount, channelLayout, mapping);
@@ -141,6 +149,14 @@ public sealed class TrackSplitService(
     // MinIO endpoint (localhost:port under Aspire), unreachable from a phone on the LAN.
     private string ToClientUrl(string key)
         => $"/storage/{Uri.EscapeDataString(_buckets.Splits)}/{key}";
+
+    private void TryDeleteLegacyLocalSplit(Track track)
+    {
+        if (track.Source != TrackSource.Plex || env.WebRootPath is null) return;
+        var ratingKey = track.Id.StartsWith("plex-", StringComparison.Ordinal) ? track.Id[5..] : track.Id;
+        var dir = Path.Combine(env.WebRootPath, "audio", ".split", "plex", ratingKey);
+        try { if (Directory.Exists(dir)) Directory.Delete(dir, true); } catch { /* best-effort */ }
+    }
 
     /// <summary>
     /// Auto-pick a channel mapping from ffprobe's reported channel count + layout.

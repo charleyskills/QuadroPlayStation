@@ -15,11 +15,11 @@ public class NowPlayingStateMachineIntegrationTests
     public void Initial_state_all_booleans_false()
     {
         var s = new NowPlayingState();
-        Assert.False(s.IsJoined);
-        Assert.False(s.IsSplitting);
-        Assert.False(s.IsBuffering);
-        Assert.False(s.IsReady);
-        Assert.False(s.IsPlaying);
+        Assert.False(s.Machine.IsJoined);
+        Assert.False(s.Machine.IsSplitting);
+        Assert.False(s.Machine.IsBuffering);
+        Assert.False(s.Machine.IsReady);
+        Assert.False(s.Machine.IsPlaying);
     }
 
     [Fact]
@@ -28,11 +28,11 @@ public class NowPlayingStateMachineIntegrationTests
         var s = new NowPlayingState();
         s.Machine.Fire(LocalDeviceTrigger.Joined);
 
-        Assert.True(s.IsJoined);
-        Assert.False(s.IsSplitting);
-        Assert.False(s.IsBuffering);
-        Assert.False(s.IsReady);
-        Assert.False(s.IsPlaying);
+        Assert.True(s.Machine.IsJoined);
+        Assert.False(s.Machine.IsSplitting);
+        Assert.False(s.Machine.IsBuffering);
+        Assert.False(s.Machine.IsReady);
+        Assert.False(s.Machine.IsPlaying);
     }
 
     [Fact]
@@ -42,11 +42,11 @@ public class NowPlayingStateMachineIntegrationTests
         s.Machine.Fire(LocalDeviceTrigger.Joined);
         s.Machine.Fire(LocalDeviceTrigger.TrackSelected);
 
-        Assert.True(s.IsJoined);
-        Assert.True(s.IsSplitting);
-        Assert.False(s.IsBuffering);
-        Assert.False(s.IsReady);
-        Assert.False(s.IsPlaying);
+        Assert.True(s.Machine.IsJoined);
+        Assert.True(s.Machine.IsSplitting);
+        Assert.False(s.Machine.IsBuffering);
+        Assert.False(s.Machine.IsReady);
+        Assert.False(s.Machine.IsPlaying);
     }
 
     [Fact]
@@ -57,11 +57,11 @@ public class NowPlayingStateMachineIntegrationTests
         s.Machine.Fire(LocalDeviceTrigger.TrackSelected);
         s.Machine.Fire(LocalDeviceTrigger.SplitDone);
 
-        Assert.True(s.IsJoined);
-        Assert.False(s.IsSplitting);
-        Assert.True(s.IsBuffering);
-        Assert.False(s.IsReady);
-        Assert.False(s.IsPlaying);
+        Assert.True(s.Machine.IsJoined);
+        Assert.False(s.Machine.IsSplitting);
+        Assert.True(s.Machine.IsBuffering);
+        Assert.False(s.Machine.IsReady);
+        Assert.False(s.Machine.IsPlaying);
     }
 
     [Fact]
@@ -73,11 +73,11 @@ public class NowPlayingStateMachineIntegrationTests
         s.Machine.Fire(LocalDeviceTrigger.SplitDone);
         s.Machine.Fire(LocalDeviceTrigger.BufferReady);
 
-        Assert.True(s.IsJoined);
-        Assert.False(s.IsSplitting);
-        Assert.False(s.IsBuffering);
-        Assert.True(s.IsReady);
-        Assert.False(s.IsPlaying);
+        Assert.True(s.Machine.IsJoined);
+        Assert.False(s.Machine.IsSplitting);
+        Assert.False(s.Machine.IsBuffering);
+        Assert.True(s.Machine.IsReady);
+        Assert.False(s.Machine.IsPlaying);
     }
 
     [Fact]
@@ -92,11 +92,11 @@ public class NowPlayingStateMachineIntegrationTests
         s.Machine.Fire(LocalDeviceTrigger.BufferReady);
         s.Machine.Fire(LocalDeviceTrigger.PlayStarted);
 
-        Assert.True(s.IsJoined);
-        Assert.False(s.IsSplitting);
-        Assert.False(s.IsBuffering);
-        Assert.True(s.IsReady);
-        Assert.True(s.IsPlaying);
+        Assert.True(s.Machine.IsJoined);
+        Assert.False(s.Machine.IsSplitting);
+        Assert.False(s.Machine.IsBuffering);
+        Assert.True(s.Machine.IsReady);
+        Assert.True(s.Machine.IsPlaying);
     }
 
     [Fact]

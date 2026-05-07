@@ -2,11 +2,8 @@
 @page "/{RoomId}"
 @rendermode InteractiveServer
 @inherits NowPlayingBase
-@using System.Text.Json
-@using SyncAudio.Core.Models
 @using SyncAudio.Client.Components.Pages.NowPlaying
 @using SyncAudio.Client.Components.Pages.NowPlaying.Panels
-@using SyncAudio.Core.Services.Plex
 
 @{
     var state = _context.State;
@@ -14,9 +11,6 @@
     var coverPaletteVar = $"--c0:{palette[0]};--c1:{palette[1]};--c2:{palette[2]};";
     var albumName = state.CurrentTrack?.Album ?? "—";
 
-    // Inline album list: current track + same-album tracks from the queue.
-    // Works for local Library plays AND Plex album plays — OnPlexAlbumTracksAsync
-    // enqueues the album as the queue.
     var current = state.CurrentTrack;
     var albumTracks = state.AlbumTracks.Count > 0
         ? state.AlbumTracks.ToArray()
@@ -27,7 +21,7 @@
                 .ToArray();
 }
 
-<div class="np-stage @(state.IsPlaying ? "np-stage--playing" : "")" style="@coverPaletteVar">
+<div class="np-stage npu-stage @(state.Machine.IsPlaying ? "np-stage--playing" : "")" style="@coverPaletteVar">
 
     @if (state.ShowUnlockPrompt)
     {
@@ -42,19 +36,24 @@
     <div class="np-bg-cover @(state.ActiveCoverSlot == 1 ? "np-bg-cover--active" : "")"
          style="@(state.CoverSlot1 is { } s1 ? $"background-image:url('{s1}')" : "")"></div>
 
-    <div class="np-frame">
-        <div class="np-scroll">
+    <div class="npu-header">
+        <TopBar AlbumName="@albumName"
+                IsJoined="state.Machine.IsJoined"
+                MemberCount="state.MemberCount"
+                GroupName="@state.GroupName"
+                IsSplitting="state.Machine.IsSplitting"
+                IsBuffering="state.Machine.IsBuffering"
+                IsWaitingForPeers="state.IsWaitingForPeers"
+                OnTogglePlex="@(() => _context.Logic.TogglePlexPanelAsync())" />
+    </div>
 
-            <TopBar AlbumName="@albumName"
-                    IsJoined="state.IsJoined"
-                    MemberCount="state.MemberCount"
-                    GroupName="@state.GroupName"
-                    IsSplitting="state.IsSplitting"
-                    IsBuffering="state.IsBuffering"
-                    IsWaitingForPeers="state.IsWaitingForPeers"
-                    OnTogglePlex="@(() => _context.Logic.TogglePlexPanelAsync())" />
+    <div class="npu-body">
 
+        <div class="npu-left">
             <CoverArt CurrentTrack="state.CurrentTrack" />
+        </div>
+
+        <div class="npu-right">
 
             <TrackHeader CurrentTrack="state.CurrentTrack"
                          IsLossless="state.IsLossless"
@@ -63,18 +62,23 @@
 
             <ProgressBar ProgressFraction="state.ProgressFraction"
                          BufferedProgress="state.BufferedProgress"
-                         IsBuffering="state.IsBuffering"
+                         IsBuffering="state.Machine.IsBuffering"
                          ElapsedDisplay="@state.ElapsedDisplay"
                          RemainingDisplay="@state.RemainingDisplay" />
 
             <TransportControls CanPrevious="state.CanPrevious"
                                CanNext="state.CanNext"
                                CanTransport="state.CanTransport"
-                               IsPlaying="state.IsPlaying"
-                               IsBuffering="state.IsBuffering || state.IsSplitting || state.AnyPeerLoading"
+                               IsPlaying="state.Machine.IsPlaying"
+                               IsBuffering="state.Machine.IsBuffering || state.Machine.IsSplitting || state.AnyPeerLoading"
                                OnPrevious="@(() => _context.Logic.PreviousAsync())"
                                OnTogglePlay="@(() => _context.Logic.TogglePlayAsync())"
                                OnNext="@(() => _context.Logic.NextAsync())" />
+
+            <div class="npu-volume">
+                <VolumeControl Volume="state.Volume"
+                               OnVolumeChanged="@(v => _context.Logic.SetVolumeAsync(v))" />
+            </div>
 
             <div class="np-pair-sync-bar">
                 <div class="np-pair-sync-bar__selector">
@@ -94,7 +98,7 @@
                     FORMAT
                 </button>
                 <button type="button"
-                        class="np-sync-toggle-btn @(state.IsJoined ? "np-sync-toggle-btn--connected" : "np-sync-toggle-btn--disconnected") @(_syncOpen ? "np-sync-toggle-btn--active" : "")"
+                        class="np-sync-toggle-btn @(state.Machine.IsJoined ? "np-sync-toggle-btn--connected" : "np-sync-toggle-btn--disconnected") @(_syncOpen ? "np-sync-toggle-btn--active" : "")"
                         @onclick="@(() => _syncOpen = !_syncOpen)">
                     SYNC
                 </button>
@@ -108,17 +112,18 @@
 
             @if (_syncOpen)
             {
-                <SyncDisclosure IsJoined="state.IsJoined"
+                <SyncDisclosure IsJoined="state.Machine.IsJoined"
                                 MemberCount="state.MemberCount"
                                 GroupName="@state.GroupName"
-                                IsSplitting="state.IsSplitting"
-                                IsBuffering="state.IsBuffering"
+                                IsSplitting="state.Machine.IsSplitting"
+                                IsBuffering="state.Machine.IsBuffering"
                                 OffsetMs="state.OffsetMs"
                                 LatencyOffsetMs="state.LatencyOffsetMs"
                                 Channels="state.Channels"
                                 LeftChannel="state.LeftChannel"
                                 RightChannel="state.RightChannel"
                                 OnJoin="@HandleJoin"
+                                OnLeave="@(() => _context.Logic.LeaveGroupAsync())"
                                 OnAdjustLatency="@(d => _context.Logic.AdjustLatencyAsync(d))"
                                 OnChannelMap="@(m => _context.Logic.SetChannelMapAsync(m.Left, m.Right))" />
             }
@@ -128,15 +133,16 @@
             <AlbumTrackList Tracks="albumTracks"
                             CurrentTrack="state.CurrentTrack"
                             AlbumName="@albumName"
-                            IsPlaying="state.IsPlaying"
+                            IsPlaying="state.Machine.IsPlaying"
                             OnTrackClick="@HandleAlbumRowClick" />
 
             <div class="np-hairline"></div>
 
         </div>
+
     </div>
 
-    <PeersOverlay IsJoined="state.IsJoined"
+    <PeersOverlay IsJoined="state.Machine.IsJoined"
                   ShowPeersPanel="state.ShowPeersPanel"
                   Peers="state.Peers" />
 
@@ -152,13 +158,17 @@
                AlbumTotal="state.PlexAlbumTotal"
                HasMore="state.HasMorePlexAlbums"
                PlexSearchQuery="@state.PlexSearchQuery"
+               AlbumTracks="state.AlbumTracks"
+               CurrentTrackId="@state.CurrentTrack?.Id"
+               SelectedAlbumRatingKey="@state.PlexCurrentAlbumRatingKey"
                OnSearch="@(q => _context.Logic.SearchPlexAlbumsAsync(q))"
                OnTogglePanel="@(() => _context.Logic.TogglePlexPanelAsync())"
                OnToggleDiscoverView="@(() => _context.Logic.ToggleDiscoverViewAsync())"
                OnRefreshAlbums="@(() => _context.Logic.RefreshDtsAlbumsAsync())"
                OnPlexConnected="@HandlePlexConnected"
                OnPlexDisconnected="@HandlePlexDisconnected"
-               OnAlbumPlay="@(rk => _context.Logic.PlayPlexAlbumAsync(rk))" />
+               OnAlbumPlay="@(rk => _context.Logic.PlayPlexAlbumAsync(rk))"
+               OnTrackSelect="@HandlePlexSheetTrackClick" />
 
     @if (state.DiscoverViewOpen)
     {
@@ -177,8 +187,3 @@
     }
 
 </div>
-
-@code {
-    protected override string? RedirectUrlForViewport(int viewportWidth)
-        => viewportWidth > 640 ? $"/desktop/{RoomId}" : null;
-}

@@ -26,9 +26,7 @@ coverage/
 *.swp
 
 # ---- App runtime data (regenerated on disk) ----
-SyncAudio/App_Data/cover-cache/
-SyncAudio/App_Data/keys/
-SyncAudio/App_Data/plex-client-id
+**/App_Data/
 
 # ---- ffmpeg quadro split cache ----
-SyncAudio/wwwroot/audio/.split/
+**/wwwroot/audio/.split/
