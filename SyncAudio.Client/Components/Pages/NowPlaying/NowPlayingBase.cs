@@ -19,7 +19,7 @@ public abstract class NowPlayingBase : ComponentBase, IAsyncDisposable
     [Parameter] public string? RoomId { get; set; }
 
     protected NowPlayingContext _context = null!;
-    protected const string DiscoverLoadMoreSentinelId = "discover-load-more-sentinel";
+    public const string DiscoverLoadMoreSentinelId = "discover-load-more-sentinel";
 
     private DotNetObjectReference<NowPlayingBase>? _selfRef;
     private bool _disposed;
@@ -434,6 +434,23 @@ public abstract class NowPlayingBase : ComponentBase, IAsyncDisposable
     {
         await _context.Logic.ToggleDiscoverViewAsync();
         await _context.Logic.PlayPlexAlbumAsync(ratingKey);
+
+        // Let the pending render (PlexSheet expanding the row with its tracklist)
+        // flush before we query the DOM for the row to scroll into view.
+        await InvokeAsync(StateHasChanged);
+        await Task.Yield();
+
+        if (!_jsInitialized) return;
+        try
+        {
+            await JS.InvokeVoidAsync("plexInterop.scrollAlbumIntoView", ratingKey);
+        }
+        catch (JSDisconnectedException) { }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            Logger.LogDebug(ex, "scrollAlbumIntoView failed for {RatingKey}", ratingKey);
+        }
     }
 
     // ─── Plex handlers ──────────────────────────────────────────────

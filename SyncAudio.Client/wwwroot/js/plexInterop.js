@@ -99,6 +99,15 @@
         }
     }
 
+    function scrollAlbumIntoView(ratingKey) {
+        if (!ratingKey) return false;
+        const sel = `[data-rating-key="${CSS.escape(String(ratingKey))}"]`;
+        const el = document.querySelector(sel);
+        if (!el) return false;
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        return true;
+    }
+
     window.plexInterop = {
         startAuth,
         checkAuthStatus,
@@ -109,5 +118,6 @@
         openLinkPage,
         installLoadMoreObserver,
         uninstallLoadMoreObserver,
+        scrollAlbumIntoView,
     };
 })();

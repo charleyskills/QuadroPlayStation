@@ -81,6 +81,7 @@
                             var isExpanded = album.RatingKey == expandedKey;
                             var isCollapsing = !isExpanded && album.RatingKey == _collapsedFromKey;
                             <button class="queue-row" type="button"
+                                    data-rating-key="@album.RatingKey"
                                     @onclick="@(() => HandleAlbumClick(album.RatingKey))">
                                 @if (album.CoverUrl is { } u)
                                 {

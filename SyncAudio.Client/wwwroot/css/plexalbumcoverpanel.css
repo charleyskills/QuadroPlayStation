@@ -1,0 +1,263 @@
+/* ── Overlay ───────────────────────────────────────────────────────────────── */
+
+.cf-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 200;
+    background: #000;
+    color: #fff;
+    overflow: hidden;
+    touch-action: none;
+    font-family: -apple-system, "SF Pro Display", system-ui, sans-serif;
+}
+
+/* ── Ambient background — blurred nearest cover ────────────────────────────── */
+
+.cf-bg {
+    position: absolute;
+    inset: -60px;
+    z-index: 0;
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
+    filter: blur(60px) saturate(140%);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.35s ease;
+    transform: translateZ(0); /* promote to its own layer to avoid filter re-paint cost */
+}
+
+.cf-bg-vignette {
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    background: linear-gradient(to bottom,
+        rgba(0,0,0,0.5) 0%,
+        rgba(0,0,0,0.2) 40%,
+        rgba(0,0,0,0.5) 100%);
+}
+
+/* ── Top bar ───────────────────────────────────────────────────────────────── */
+
+.cf-topbar {
+    position: relative;
+    z-index: 20;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: max(env(safe-area-inset-top, 16px), 16px) 16px 0;
+}
+
+.cf-topbar__plex {
+    padding: 6px 10px;
+    border-radius: 16px;
+    background: rgba(255, 255, 255, 0.08);
+    display: inline-flex;
+    align-items: center;
+    cursor: default;
+}
+
+.cf-topbar__title {
+    text-align: center;
+}
+
+.cf-eyebrow {
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 1.2px;
+    color: rgba(255, 255, 255, 0.45);
+    text-transform: uppercase;
+}
+
+.cf-count {
+    font-size: 12px;
+    font-weight: 600;
+    margin-top: 1px;
+    color: rgba(255, 255, 255, 0.8);
+    transition: opacity 0.15s ease;
+}
+
+/* ── Close button ──────────────────────────────────────────────────────────── */
+
+.cf-close {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: rgba(255, 255, 255, 0.08);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: background 0.15s ease, border-color 0.15s ease;
+    padding: 0;
+}
+
+.cf-close:hover {
+    background: rgba(255, 255, 255, 0.16);
+    border-color: rgba(255, 255, 255, 0.24);
+}
+
+/* ── Coverflow stage + cards ───────────────────────────────────────────────── */
+
+.cf-stage {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none; /* let wheel events fall through to .cf-overlay */
+}
+
+.cf-card-container {
+    position: relative;
+    width: var(--cf-cover-size, 310px);
+    height: var(--cf-cover-size, 310px);
+    pointer-events: auto;
+}
+
+.cf-card {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: var(--cf-cover-size, 310px);
+    height: var(--cf-cover-size, 310px);
+    /* Initial transform — JS overrides every frame. */
+    transform: translate(-50%, -50%);
+    border: 0;
+    padding: 0;
+    background: none;
+    cursor: pointer;
+    will-change: transform;
+}
+
+.cf-card:disabled {
+    cursor: default;
+}
+
+.cf-card__img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    border-radius: 12px;
+    display: block;
+    user-select: none;
+    -webkit-user-drag: none;
+    box-shadow: 0 12px 48px rgba(0, 0, 0, 0.6),
+                0 4px 16px rgba(0, 0, 0, 0.4);
+}
+
+.cf-card__img--placeholder {
+    background: linear-gradient(135deg, #5EC8FF 0%, #7A3CFF 100%);
+}
+
+/* Shadow Overlay blur mode — JS writes the rgba alpha each frame. */
+.cf-card__overlay {
+    position: absolute;
+    inset: 0;
+    border-radius: 12px;
+    background: rgba(0, 0, 0, 0);
+    pointer-events: none;
+}
+
+/* ── Bottom info pane ──────────────────────────────────────────────────────── */
+
+.cf-info {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 64px;
+    padding: 0 24px;
+    text-align: center;
+    z-index: 20;
+    transition: opacity 0.1s ease;
+    pointer-events: none;
+}
+
+.cf-info__title {
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: -0.4px;
+}
+
+.cf-info__artist {
+    font-size: 14px;
+    color: rgba(255, 255, 255, 0.5);
+    margin-top: 4px;
+}
+
+/* ── Right-side position bar ───────────────────────────────────────────────── */
+
+.cf-position-bar {
+    position: absolute;
+    right: 10px;
+    top: 50%;
+    transform: translateY(-50%);
+    z-index: 20;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    pointer-events: none;
+}
+
+.cf-position-dot {
+    width: 4px;
+    height: 4px;
+    border-radius: 2px;
+    background: rgba(255, 255, 255, 0.25);
+    transition: height 0.15s ease;
+}
+
+/* ── Scroll hint at the very bottom ────────────────────────────────────────── */
+
+.cf-scroll-hint {
+    position: absolute;
+    bottom: 16px;
+    left: 0;
+    right: 0;
+    text-align: center;
+    z-index: 20;
+    font-size: 10px;
+    color: rgba(255, 255, 255, 0.2);
+    letter-spacing: 0.5px;
+    pointer-events: none;
+}
+
+.cf-scroll-hint__inner {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    animation: cfBounce 2s ease-in-out infinite;
+}
+
+@keyframes cfBounce {
+    0%, 100% { transform: translateY(0);    opacity: 0.5; }
+    50%      { transform: translateY(-4px); opacity: 1;   }
+}
+
+/* ── Load-more sentinel + indicator ────────────────────────────────────────── */
+
+.cf-load-sentinel {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    width: 1px;
+    height: 1px;
+    pointer-events: none;
+}
+
+.cf-loading-more {
+    position: absolute;
+    top: 64px;
+    right: 24px;
+    z-index: 20;
+    font-size: 11px;
+    letter-spacing: 0.04em;
+    color: rgba(255, 255, 255, 0.45);
+    pointer-events: none;
+}
